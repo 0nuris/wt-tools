@@ -132,10 +132,23 @@ else
   echo "  skip: hook not installed."
 fi
 
-# ---- 2b. patch installed skill callout with detected GitHub owner -------
+# ---- 2b. install + patch multi-repo-dispatch skill ----------------------
 SKILL_FILE="${SKILL_FILE:-$HOME/.claude/skills/multi-repo-dispatch/SKILL.md}"
+SKILL_SOURCE="$WT_TOOLS_HOME/skills/multi-repo-dispatch/SKILL.md"
+
+echo
+if [[ ! -f "$SKILL_FILE" ]] && [[ -f "$SKILL_SOURCE" ]]; then
+  if ask "install the multi-repo-dispatch skill to $SKILL_FILE?"; then
+    mkdir -p "$(dirname "$SKILL_FILE")"
+    cp "$SKILL_SOURCE" "$SKILL_FILE"
+    echo "  copy: $SKILL_FILE (from $SKILL_SOURCE)"
+  else
+    echo "  skip: skill not installed."
+  fi
+fi
+
+# Patch the installed skill's wt-tools link with the detected GitHub owner.
 if [[ -f "$SKILL_FILE" ]] && grep -q '<your-fork-owner>' "$SKILL_FILE"; then
-  echo
   if ask "patch $SKILL_FILE wt-tools link with your GitHub owner?"; then
     OWNER=""
     if command -v gh >/dev/null 2>&1; then

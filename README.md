@@ -13,6 +13,7 @@ The pitch: when you orchestrate work across multiple repos (one agent per repo, 
 | `bin/wt-validate-bash` | The hook validator | Script |
 | `hooks/settings.fragment.json` | PreToolUse rules | Hook config |
 | `config/wt-tools.conf.example` | Sourceable POSIX shell config | Config |
+| `skills/multi-repo-dispatch/SKILL.md` | The orchestration playbook the hook enforces | Claude Code skill |
 | `install.sh` | Idempotent installer | Script |
 
 ## Requirements
