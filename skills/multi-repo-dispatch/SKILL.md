@@ -1,11 +1,21 @@
 ---
 name: multi-repo-dispatch
-description: Use when starting work that spans 2+ repos from a parent dir like ~/projects (no single git repo in cwd), or when picking up a Linear issue that touches multiple repos. Orchestrates parallel subagents in isolated worktrees and lands draft PRs only — never ready-for-review.
+description: Use when starting work that spans 2+ repos from a parent dir like ~/projects (no single git repo in cwd), or when picking up an issue that touches multiple repos. Orchestrates parallel subagents in isolated worktrees and lands draft PRs only — never ready-for-review.
 ---
 
 # Multi-Repo Dispatch
 
 > **Deterministic enforcement (recommended):** install [`wt-tools`](https://github.com/<your-fork-owner>/wt-tools). When the PreToolUse hook is active, the rules below — draft PRs only, no `gh pr ready`, no `gh pr merge` from automation, no `git worktree remove --force` — are enforced at the harness level regardless of whether the model complies with this skill text. Without `wt-tools`, the prose below is the only guard.
+
+## Customize for your stack
+
+This file ships generic. Three things vary by team and live in your environment, **not in this file**:
+
+1. **Parent dir of repos.** Default is `~/projects`. Override in `~/.config/wt-tools/wt-tools.conf` via `WT_ROOT`.
+2. **Issue tracker integration** (Linear / Jira / GitHub Issues / Asana / Shortcut / …). The skill uses placeholders below — `<tracker-identify-repos>`, `<tracker-comment>`, `<tracker-link-prs>`. Replace those with the names of your own skills that perform those operations, or delete the tracker-input path entirely and use explicit input mode only.
+3. **Default branch name.** This skill says `<default-branch>` in command templates. Substitute with `main`, `master`, `develop`, or whatever your repos use.
+
+If you don't have tracker-helper skills, the explicit-input mode ("apply X in repos A and B") works without any tracker dependency.
 
 ## Overview
 
@@ -17,8 +27,8 @@ You are orchestrating, not implementing. From a parent directory containing many
 
 ## When to Use
 
-- Cwd is a parent dir of repos (e.g. `~/projects`), not a single repo
-- Linear issue touches 2+ repos
+- Cwd is a parent dir of repos (e.g. `$WT_ROOT`, default `~/projects`), not a single repo
+- Tracked issue touches 2+ repos
 - Explicit instruction names 2+ repos to apply a change to
 
 **Do NOT use when:**
@@ -40,12 +50,12 @@ You are orchestrating, not implementing. From a parent directory containing many
 
 **TaskCreate one task per planned (repo, agent) pair as you discover them.** Track partial progress at the orchestrator level.
 
-**Linear input** (issue ID, URL, or "pick up SOF-XXX"):
-1. **REQUIRED:** invoke `linear-identify-repos` skill. Do not grep ad-hoc. Do not trust prior audit comments. Re-run every time.
+**Tracker input** (issue ID, URL, or "pick up <TRACKER-ID>"):
+1. **REQUIRED:** invoke `<tracker-identify-repos>` — your skill that turns a tracker issue into the authoritative list of affected repos. Do not grep ad-hoc. Do not trust prior audit comments. Re-run every time.
 2. Use that skill's repo list as authoritative.
 
-**Explicit input** ("apply X in MoveEarth and ios-field-app-api"):
-1. Resolve each named dir under the parent: `ls -d <parent>/<repo-name>`.
+**Explicit input** ("apply X in repo-A and repo-B"):
+1. Resolve each named dir under the parent: `ls -d "$WT_ROOT/<repo-name>"`.
 2. If any name is ambiguous or missing, ask the user before proceeding.
 
 **Either way:** if the resolved repo set has only one repo, STOP and tell the user to run a normal session in that repo. This skill is for ≥2 repos.
@@ -61,9 +71,9 @@ For each target repo, decide aloud: **one agent or multiple agents?**
 ### Phase 3: Worktree setup per agent
 
 For each (repo, task) pair:
-1. `cd <parent>/<repo>` (each repo is its own setup; the parent dir is not a git repo).
+1. `cd "$WT_ROOT/<repo>"` (each repo is its own setup; the parent dir is not a git repo).
 2. **REQUIRED:** invoke `using-git-worktrees` to create the isolated workspace.
-3. Branch name: `<linear-id>-<short-slug>` (Linear input) or `<short-slug>` (explicit input).
+3. Branch name: `<tracker-id>-<short-slug>` (tracker input) or `<short-slug>` (explicit input).
 
 **Never create branches in the repo's existing checkout.** Parallel agents would collide. Worktree per agent is the only safe arrangement, even if the user "isn't on a branch you'd disturb."
 
@@ -82,11 +92,26 @@ When subagents return, categorize each:
 
 **Ship the wins, surface failures.** Never roll back a successful agent because another failed. Failed worktrees are NOT cleaned up — the user inspects them.
 
-### Phase 6: Linear coordination (only if Linear input)
+### Phase 6: Tracker coordination (only if tracker input)
 
-If input was a Linear issue, invoke `linear-issue-operations` (or `linear-github-coordination` if multiple PRs need linking) to:
+If input was a tracked issue, invoke `<tracker-comment>` (or `<tracker-link-prs>` if multiple PRs need linking) to:
 - Post ONE comment listing the draft PR URLs + any failures
 - **Do NOT change issue state.** Drafts are not "in review". The user moves state when they mark PRs ready.
+
+## Required external skills
+
+This skill invokes other skills by name. Install or substitute:
+
+**Always required:**
+- `using-git-worktrees` — from the [superpowers](https://github.com/anthropics/claude-code) plugin. Per-agent worktree creation.
+- `dispatching-parallel-agents` — from superpowers. Parallel fan-out discipline.
+
+**Required only when picking up a tracked issue (skip for explicit input mode):**
+- `<tracker-identify-repos>` — turn a tracker issue into the authoritative list of affected repos.
+- `<tracker-comment>` — post a comment back on the issue.
+- `<tracker-link-prs>` — link multiple PRs to one issue.
+
+Replace each `<tracker-…>` placeholder with the actual name of a skill you have (Linear, Jira, GitHub Issues, etc.). If you don't have any tracker-helper skills, use explicit input mode only.
 
 ## Subagent prompt template
 
@@ -96,7 +121,7 @@ Each subagent gets a self-contained prompt — they do not inherit your session.
 You are working on <repo> in worktree <abs path>, on branch <branch>.
 
 # Task
-<one focused task description — copied from the Linear issue's relevant slice or the user's explicit instruction>
+<one focused task description — copied from the tracker issue's relevant slice or the user's explicit instruction>
 
 # Constraints
 - Work ONLY in this worktree. Do not touch other repos.
@@ -106,7 +131,7 @@ You are working on <repo> in worktree <abs path>, on branch <branch>.
 
 # Finishing contract
 When your changes are complete and tests pass:
-1. Commit with a message referencing <linear-id if any>.
+1. Commit with a message referencing <tracker-id if any>.
 2. Push the branch: git push -u origin <branch>
 3. Open a DRAFT pull request:
    gh pr create --draft --title "<title>" --body "<body referencing the issue>" --base <default-branch>
@@ -122,8 +147,8 @@ Report: PR URL (or "no diff needed" / failure summary), branch name, and any blo
 - **No nested orchestration.** Subagents you dispatch from this skill MUST NOT re-invoke `multi-repo-dispatch`. The subagent prompt template forbids it. If a subagent reports back asking to orchestrate further, that's a sign the original decomposition was wrong — re-scope at the orchestrator level, do not let the subagent recurse.
 - **No cross-repo subagent.** One agent never touches two repos. Two repos = two agents minimum.
 - **Preserve all worktrees on failure.** Do not delete branches or worktrees of failed agents. The user needs them to debug.
-- **No silent Linear state changes.** Comment only. State transitions belong to the human.
-- **Parent dir is not a git repo.** Do not run git commands from `~/projects`. Always `cd` into a specific repo first.
+- **No silent tracker state changes.** Comment only. State transitions belong to the human.
+- **Parent dir is not a git repo.** Do not run git commands from `$WT_ROOT`. Always `cd` into a specific repo first.
 
 ## Common rationalizations — STOP
 
@@ -133,9 +158,9 @@ Report: PR URL (or "no diff needed" / failure summary), branch name, and any blo
 | "Drafts are pointless because I'll mark it ready right after" | The user marks PRs ready. Not you. |
 | "I'm a single agent, serial work is fine" | Then you're not orchestrating. Dispatch subagents in parallel. |
 | "Worktrees are overhead for a clean repo" | Parallel agents on the same repo collide without them. |
-| "I can grep faster than running linear-identify-repos" | The skill exists because grep misses ripple effects. Use it. |
+| "I can grep faster than running the tracker-identify-repos skill" | That skill exists because grep misses ripple effects. Use it. |
 | "One agent failed, I should roll back the wins" | Ship the wins. Surface the failure. Always. |
-| "I should move the Linear issue to In Review" | Drafts are not in review. Comment-only. |
+| "I should move the tracker issue to In Review" | Drafts are not in review. Comment-only. |
 | "It's only one repo — I'll still orchestrate" | Single-repo = normal session. This skill is for ≥2 repos. |
 
 ## Red flags — STOP and re-read this skill
@@ -145,9 +170,9 @@ Report: PR URL (or "no diff needed" / failure summary), branch name, and any blo
 - About to work in a repo's main checkout instead of a worktree
 - About to dispatch one subagent to two repos
 - About to delete a failed agent's worktree or branch
-- About to call `save_issue` to change Linear state
+- About to change tracker issue state (you only comment)
 - About to recurse — orchestrating from inside an orchestrated subagent
-- About to skip `linear-identify-repos` "because the issue already has an audit comment"
+- About to skip your tracker-identify-repos step "because the issue already has an audit comment"
 
 All of these mean: STOP. Re-read the relevant guardrail.
 
@@ -155,23 +180,16 @@ All of these mean: STOP. Re-read the relevant guardrail.
 
 | Step | Skill invoked |
 |---|---|
-| Repo identification (Linear input) | `linear-identify-repos` |
+| Repo identification (tracker input) | `<tracker-identify-repos>` |
 | Worktree creation per agent | `using-git-worktrees` |
 | Parallel dispatch discipline | `dispatching-parallel-agents` |
-| Linear PR linking (multi-PR) | `linear-github-coordination` |
-| Linear comment posting | `linear-issue-operations` |
+| Tracker PR linking (multi-PR) | `<tracker-link-prs>` |
+| Tracker comment posting | `<tracker-comment>` |
 
 | Decision | Default |
 |---|---|
 | Agents per repo | 1 (split only for cleanly independent concerns) |
 | Branch location | Always a worktree, never the main checkout |
 | PR state | Draft, always |
-| Linear state | Comment only, never change state |
+| Tracker state | Comment only, never change state |
 | On partial failure | Ship wins, preserve failed worktrees, report |
-
-## Cross-references
-
-- **REQUIRED:** `using-git-worktrees` — per-agent isolation
-- **REQUIRED:** `dispatching-parallel-agents` — fan-out discipline
-- **REQUIRED for Linear input:** `linear-identify-repos` — authoritative repo mapping
-- **For Linear coordination:** `linear-issue-operations`, `linear-github-coordination`

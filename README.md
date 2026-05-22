@@ -31,7 +31,9 @@ The orchestration skill at `skills/multi-repo-dispatch/SKILL.md` invokes other s
 |---|---|---|
 | `using-git-worktrees` | [superpowers plugin](https://github.com/anthropics/claude-code) | always (per-agent worktree creation) |
 | `dispatching-parallel-agents` | superpowers | always (parallel fan-out discipline) |
-| `linear-identify-repos`, `linear-issue-operations`, `linear-github-coordination` | user-specific | only when picking up Linear issues; substitute your own tracker-helper skills or use explicit input mode |
+| `<tracker-identify-repos>`, `<tracker-comment>`, `<tracker-link-prs>` | **you provide** — point them at your tracker (Linear / Jira / GitHub Issues / …) | only when picking up a tracked issue; for explicit input ("apply X in repos A and B") no tracker skills are needed |
+
+The skill ships with `<tracker-…>` placeholders. After install, open `~/.claude/skills/multi-repo-dispatch/SKILL.md` and substitute each placeholder with the actual name of a skill you have (or delete the tracker-input path entirely if you don't have any tracker-helper skills).
 
 `wt-tools` itself (the audit/clean/validator) has no skill dependencies — those are listed only because the bundled skill references them.
 
