@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+# wt-clean — gated cleanup of removable worktrees.
+#
+# Reads candidate set from wt-audit --json --filter removable, applies safety
+# filters (detached, sibling-dir, dirty), runs `git worktree remove`.
+#
+# Dry-run by default. --apply required to mutate.
+#
+# Usage:
+#   wt-clean [--repo NAME] [--root DIR] [--stale-days N]
+#            [--apply]
+#            [--include-detached] [--include-sibling-dirs]
+#            [--force] [--also-delete-branch] [--force-delete-branch]
+
+set -euo pipefail
+
+WT_TOOLS_CONFIG="${WT_TOOLS_CONFIG:-$HOME/.config/wt-tools/wt-tools.conf}"
+# shellcheck source=/dev/null
+[[ -f "$WT_TOOLS_CONFIG" ]] && . "$WT_TOOLS_CONFIG"
+
+: "${WT_ROOT:=$HOME/projects}"
+: "${WT_STALE_DAYS_CLEAN:=60}"
+
+# Locate wt-audit (sibling of this script).
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+WT_AUDIT="$SCRIPT_DIR/wt-audit"
+
+# ---- flag parsing --------------------------------------------------------
+APPLY=0
+ONLY_REPO=""
+INCLUDE_DETACHED=0
+INCLUDE_SIBLING_DIRS=0
+FORCE=0
+ALSO_DELETE_BRANCH=0
+FORCE_DELETE_BRANCH=0
+STALE_DAYS_OVERRIDE=""
+ROOT_OVERRIDE=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --apply) APPLY=1; shift ;;
+    --repo) ONLY_REPO="$2"; shift 2 ;;
+    --root) ROOT_OVERRIDE="$2"; shift 2 ;;
+    --stale-days) STALE_DAYS_OVERRIDE="$2"; shift 2 ;;
+    --include-detached) INCLUDE_DETACHED=1; shift ;;
+    --include-sibling-dirs) INCLUDE_SIBLING_DIRS=1; shift ;;
+    --force) FORCE=1; shift ;;
+    --also-delete-branch) ALSO_DELETE_BRANCH=1; shift ;;
+    --force-delete-branch) FORCE_DELETE_BRANCH=1; ALSO_DELETE_BRANCH=1; shift ;;
+    --help|-h)
+      sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0 ;;
+    *) echo "wt-clean: unknown flag: $1" >&2; exit 2 ;;
+  esac
+done
+
+# ---- gather candidates ---------------------------------------------------
+audit_args=(--json --filter removable)
+[[ -n "$ONLY_REPO" ]] && audit_args+=(--repo "$ONLY_REPO")
+[[ -n "$ROOT_OVERRIDE" ]] && audit_args+=(--root "$ROOT_OVERRIDE")
+[[ -n "$STALE_DAYS_OVERRIDE" ]] && audit_args+=(--stale-days "$STALE_DAYS_OVERRIDE")
+
+candidates="$(bash "$WT_AUDIT" "${audit_args[@]}")"
+
+# ---- apply safety filters ------------------------------------------------
+# Build a jq filter expression dynamically.
+jq_filter=".[]"
+(( INCLUDE_DETACHED )) || jq_filter+=' | select(.detached != "yes")'
+(( INCLUDE_SIBLING_DIRS )) || jq_filter+=' | select(.sibling_dir != "yes")'
+(( FORCE )) || jq_filter+=' | select(.dirty != "yes")'
+
+filtered="$(jq -c "[$jq_filter]" <<<"$candidates")"
+
+count=$(jq 'length' <<<"$filtered")
+
+if [[ "$count" == "0" ]]; then
+  echo "wt-clean: no candidate worktrees match current filters."
+  echo "         (run wt-audit to see what's there; add --include-detached, --include-sibling-dirs, or --force to broaden.)"
+  exit 0
+fi
+
+# ---- print plan ----------------------------------------------------------
+if (( APPLY )); then
+  echo "wt-clean: APPLYING removal of $count worktree(s)."
+else
+  echo "wt-clean: dry-run. $count worktree(s) would be removed (pass --apply to execute):"
+fi
+echo
+
+jq -r '.[] | "  [\(.repo)] \(.path)  (branch=\(.branch // "-"), age=\(.age_days)d, reasons=\([
+  if .merged == "yes" then "merged" else empty end,
+  if .upstream_gone == "yes" then "upstream-gone" else empty end,
+  if .stale == "yes" then "stale" else empty end
+] | join(",")))"' <<<"$filtered"
+echo
+
+if ! (( APPLY )); then
+  echo "Re-run with --apply to remove."
+  exit 0
+fi
+
+# ---- execute -------------------------------------------------------------
+failures=0
+while IFS=$'\x1f' read -r repo path branch; do
+  # Find the absolute repo path by walking up from the worktree to its common-dir.
+  # The audit returned `.repo` as the basename; we need the actual path.
+  repo_path="$WT_ROOT/$repo"
+  if [[ ! -d "$repo_path/.git" ]] && [[ ! -f "$repo_path/.git" ]]; then
+    # The 'repo' might not be at WT_ROOT/<repo>. Resolve via the worktree's common-dir.
+    if [[ -d "$path" ]] || [[ -d "$(dirname "$path")" ]]; then
+      common=$(cd "$path" 2>/dev/null && git rev-parse --git-common-dir 2>/dev/null || true)
+      if [[ -n "$common" && "$common" != /* ]]; then
+        common="$(cd "$path" && cd "$common" && pwd -P)"
+      fi
+      [[ -n "$common" ]] && repo_path="$(dirname "$common")"
+    fi
+  fi
+
+  remove_args=(worktree remove)
+  (( FORCE )) && remove_args+=(--force)
+  remove_args+=("$path")
+
+  if git -C "$repo_path" "${remove_args[@]}"; then
+    echo "  removed: $path"
+  else
+    echo "  FAILED: $path" >&2
+    failures=$((failures + 1))
+    continue
+  fi
+
+  if (( ALSO_DELETE_BRANCH )) && [[ -n "$branch" && "$branch" != "(detached)" && "$branch" != "-" ]]; then
+    branch_args=(branch)
+    if (( FORCE_DELETE_BRANCH )); then
+      branch_args+=(-D)
+    else
+      branch_args+=(-d)
+    fi
+    branch_args+=("$branch")
+
+    if git -C "$repo_path" "${branch_args[@]}"; then
+      echo "    deleted branch: $branch"
+    else
+      echo "    FAILED to delete branch (use --force-delete-branch to override): $branch" >&2
+      failures=$((failures + 1))
+    fi
+  fi
+done < <(jq -r '.[] | [.repo, .path, .branch] | @tsv' <<<"$filtered" | tr '\t' '\x1f')
+
+if (( failures > 0 )); then
+  echo
+  echo "wt-clean: $failures failure(s) — see stderr above." >&2
+  exit 1
+fi
+
+echo
+echo "wt-clean: done."

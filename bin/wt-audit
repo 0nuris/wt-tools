@@ -1,0 +1,250 @@
+#!/usr/bin/env bash
+# wt-audit — cross-repo read-only inventory of git worktrees.
+#
+# Walks $WT_ROOT/*, finds repos with linked worktrees, annotates each with
+# branch state. No writes. No prompts.
+#
+# Usage:
+#   wt-audit [--repo NAME] [--root DIR] [--stale-days N]
+#            [--json] [--filter removable]
+
+set -euo pipefail
+
+# ---- defaults / config ---------------------------------------------------
+WT_TOOLS_CONFIG="${WT_TOOLS_CONFIG:-$HOME/.config/wt-tools/wt-tools.conf}"
+# shellcheck source=/dev/null
+[[ -f "$WT_TOOLS_CONFIG" ]] && . "$WT_TOOLS_CONFIG"
+
+: "${WT_ROOT:=$HOME/projects}"
+: "${WT_WORKTREE_DIR:=.worktrees}"
+: "${WT_STALE_DAYS_AUDIT:=30}"
+: "${WT_IGNORE_REPOS:=}"
+
+# ---- flag parsing --------------------------------------------------------
+ONLY_REPO=""
+OUTPUT_JSON=0
+FILTER_REMOVABLE=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --repo) ONLY_REPO="$2"; shift 2 ;;
+    --root) WT_ROOT="$2"; shift 2 ;;
+    --stale-days) WT_STALE_DAYS_AUDIT="$2"; shift 2 ;;
+    --json) OUTPUT_JSON=1; shift ;;
+    --filter)
+      case "${2:-}" in
+        removable) FILTER_REMOVABLE=1 ;;
+        *) echo "wt-audit: unknown --filter value: ${2:-}" >&2; exit 2 ;;
+      esac
+      shift 2 ;;
+    --help|-h)
+      sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0 ;;
+    *) echo "wt-audit: unknown flag: $1" >&2; exit 2 ;;
+  esac
+done
+
+WT_ROOT="${WT_ROOT/#~/$HOME}"
+
+# ---- helpers -------------------------------------------------------------
+NOW="$(date +%s)"
+
+# Determine the default branch for a repo. Try origin/HEAD first; fall back
+# to "main" then "master".
+default_branch_for() {
+  local repo="$1" ref
+  ref=$(git -C "$repo" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || true)
+  if [[ -n "$ref" ]]; then
+    printf '%s' "${ref#origin/}"
+    return
+  fi
+  for guess in main master; do
+    if git -C "$repo" rev-parse --verify --quiet "refs/heads/$guess" >/dev/null; then
+      printf '%s' "$guess"
+      return
+    fi
+  done
+  printf 'HEAD'
+}
+
+# Emit one JSON object per linked worktree (excluding the main worktree).
+# Stdin: `git worktree list --porcelain` output for a single repo.
+emit_worktrees_for_repo() {
+  local repo="$1" repo_name="$2" default_branch="$3"
+  local wt_dir="$repo/$WT_WORKTREE_DIR"
+  local awk_program
+
+  # Parse porcelain; the first record is always the main worktree (no need
+  # to annotate). Subsequent records are linked worktrees.
+  # Use \x1f (ASCII unit separator) between fields so bash read does not
+  # collapse empty fields the way it does with tab.
+  awk_program='
+    BEGIN { record = 0; SEP = "\x1f" }
+    /^worktree / { if (record) print_record(); record=1; path=substr($0,10); head=""; branch=""; detached=0; next }
+    /^HEAD /     { head=$2; next }
+    /^branch /   { branch=$2; next }
+    /^detached/  { detached=1; next }
+    /^$/         { if (record) { print_record(); record=0 }; next }
+    END          { if (record) print_record() }
+    function print_record() {
+      print path SEP head SEP branch SEP detached
+    }
+  '
+
+  local main_seen=0
+  while IFS=$'\x1f' read -r path head branch detached; do
+    if [[ $main_seen -eq 0 ]]; then
+      main_seen=1
+      continue
+    fi
+
+    local short_branch=""
+    if [[ -n "$branch" ]]; then
+      short_branch="${branch#refs/heads/}"
+    fi
+
+    local commit_ts age_days
+    commit_ts=$(git -C "$repo" log -1 --format=%at "$head" 2>/dev/null || echo "$NOW")
+    age_days=$(( (NOW - commit_ts) / 86400 ))
+
+    local merged="no" upstream_gone="no" dirty="no" sibling_dir="no" is_detached="no"
+    [[ "$detached" == "1" ]] && is_detached="yes"
+
+    if [[ -n "$short_branch" ]]; then
+      if git -C "$repo" branch --merged "$default_branch" 2>/dev/null | sed 's/^[ *]*//' | grep -qx "$short_branch"; then
+        merged="yes"
+      fi
+      local upstream
+      upstream=$(git -C "$repo" for-each-ref --format='%(upstream:track)' "refs/heads/$short_branch" 2>/dev/null || true)
+      [[ "$upstream" == *'[gone]'* ]] && upstream_gone="yes"
+    fi
+
+    if [[ -d "$path" ]] && [[ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ]]; then
+      dirty="yes"
+    fi
+
+    case "$path" in
+      "$wt_dir"/*) sibling_dir="no" ;;
+      *)           sibling_dir="yes" ;;
+    esac
+
+    local stale="no"
+    if (( age_days > WT_STALE_DAYS_AUDIT )); then
+      stale="yes"
+    fi
+
+    # Determine "removable" candidacy.
+    local removable="no"
+    if [[ "$merged" == "yes" || "$upstream_gone" == "yes" || "$stale" == "yes" ]]; then
+      removable="yes"
+    fi
+
+    jq -nc \
+      --arg repo "$repo_name" \
+      --arg path "$path" \
+      --arg branch "$short_branch" \
+      --arg default_branch "$default_branch" \
+      --argjson age_days "$age_days" \
+      --arg merged "$merged" \
+      --arg upstream_gone "$upstream_gone" \
+      --arg dirty "$dirty" \
+      --arg sibling_dir "$sibling_dir" \
+      --arg detached "$is_detached" \
+      --arg stale "$stale" \
+      --arg removable "$removable" '
+      {
+        repo: $repo,
+        path: $path,
+        branch: $branch,
+        default_branch: $default_branch,
+        age_days: $age_days,
+        merged: $merged,
+        upstream_gone: $upstream_gone,
+        dirty: $dirty,
+        sibling_dir: $sibling_dir,
+        detached: $detached,
+        stale: $stale,
+        removable: $removable
+      }'
+  done < <(git -C "$repo" worktree list --porcelain | awk "$awk_program")
+}
+
+repo_is_ignored() {
+  local name="$1" ignore
+  for ignore in $WT_IGNORE_REPOS; do
+    [[ "$name" == "$ignore" ]] && return 0
+  done
+  return 1
+}
+
+# ---- gather --------------------------------------------------------------
+records="[]"
+for d in "$WT_ROOT"/*/; do
+  d="${d%/}"
+  repo_name="$(basename "$d")"
+
+  [[ -n "$ONLY_REPO" && "$repo_name" != "$ONLY_REPO" ]] && continue
+  repo_is_ignored "$repo_name" && continue
+
+  # Must be a git working tree
+  git -C "$d" rev-parse --git-dir >/dev/null 2>&1 || continue
+  # Skip submodules
+  superproject=$(git -C "$d" rev-parse --show-superproject-working-tree 2>/dev/null || true)
+  [[ -n "$superproject" ]] && continue
+  # Skip linked worktrees — their worktrees are reported via the main repo.
+  # A linked worktree has GIT_DIR != GIT_COMMON_DIR (both as absolute paths).
+  git_dir=$(git -C "$d" rev-parse --absolute-git-dir 2>/dev/null || true)
+  git_common=$(cd "$d" && git rev-parse --git-common-dir 2>/dev/null && cd - >/dev/null || true)
+  # git-common-dir may be relative; normalize.
+  if [[ -n "$git_common" && "$git_common" != /* ]]; then
+    git_common="$(cd "$d" && cd "$git_common" && pwd -P)"
+  fi
+  [[ -n "$git_dir" && -n "$git_common" && "$git_dir" != "$git_common" ]] && continue
+
+  default_branch=$(default_branch_for "$d")
+
+  while IFS= read -r rec; do
+    records=$(jq -c --argjson rec "$rec" '. + [$rec]' <<<"$records")
+  done < <(emit_worktrees_for_repo "$d" "$repo_name" "$default_branch")
+done
+
+# ---- filter --------------------------------------------------------------
+if (( FILTER_REMOVABLE )); then
+  records=$(jq -c '[.[] | select(.removable == "yes")]' <<<"$records")
+fi
+
+# ---- output --------------------------------------------------------------
+if (( OUTPUT_JSON )); then
+  jq '.' <<<"$records"
+  exit 0
+fi
+
+# Human-readable table.
+if [[ "$(jq 'length' <<<"$records")" == "0" ]]; then
+  echo "wt-audit: no linked worktrees found under $WT_ROOT${ONLY_REPO:+ (repo=$ONLY_REPO)}"
+  exit 0
+fi
+
+printf '%-22s %-50s %-20s %5s  %-7s %-7s %-7s %-6s %-7s\n' \
+  REPO PATH BRANCH AGE MERGED UPSTRM DIRTY DETACH SIBLING
+printf '%-22s %-50s %-20s %5s  %-7s %-7s %-7s %-6s %-7s\n' \
+  ---- ---- ------ --- ------ ------ ----- ------ -------
+
+# Use \x1f to separate fields; bash read collapses adjacent tabs and would
+# eat empty .branch fields. Replace empty branch with a placeholder in jq
+# too, so detached rows render correctly.
+jq -r '.[] | [
+  .repo,
+  .path,
+  (if .detached == "yes" then "(detached)" elif .branch == "" then "-" else .branch end),
+  .age_days,
+  .merged,
+  (if .upstream_gone == "yes" then "gone" else "-" end),
+  .dirty,
+  .detached,
+  .sibling_dir
+] | join("")' <<<"$records" | \
+while IFS=$'\x1f' read -r repo path branch age merged upstream dirty detached sibling; do
+  printf '%-22s %-50s %-20s %5s  %-7s %-7s %-7s %-6s %-7s\n' \
+    "$repo" "$path" "$branch" "${age}d" "$merged" "$upstream" "$dirty" "$detached" "$sibling"
+done

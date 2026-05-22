@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# wt-validate-bash — Claude Code PreToolUse hook validator for Bash commands.
+#
+# Reads stdin JSON, extracts .tool_input.command, applies the rule named in
+# $WT_TOOLS_RULE, and writes a permissionDecision JSON to stdout when blocking.
+# Exit 0 always (deny is signalled via JSON, not exit code).
+#
+# Threat model: token-level matching after whitespace splitting. Catches direct
+# invocations the model normally produces. Does NOT catch heredocs, bash -c
+# strings, string-constructed commands, or aliases. See README.
+
+set -euo pipefail
+
+# ---- read input ----------------------------------------------------------
+# Rule is passed as $1, with $WT_TOOLS_RULE as a fallback (for invocation styles
+# that prefer env vars). Either works.
+input="$(cat)"
+command="$(printf '%s' "$input" | jq -r '.tool_input.command // empty')"
+rule="${1:-${WT_TOOLS_RULE:-}}"
+
+# If we can't process, defer to normal permission flow.
+if [[ -z "$command" || -z "$rule" ]]; then
+  exit 0
+fi
+
+# ---- helpers -------------------------------------------------------------
+deny() {
+  local reason="$1"
+  jq -n --arg reason "$reason" '{
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: $reason
+    }
+  }'
+  exit 0
+}
+
+# Token-presence check (exact match).
+has_token() {
+  local target="$1"; shift
+  local t
+  for t in "$@"; do
+    if [[ "$t" == "$target" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# ---- tokenize ------------------------------------------------------------
+# Word-split on whitespace. Best-effort; quoted args may be partial tokens,
+# but that's acceptable for our flag-presence checks (--draft, --force).
+read -ra tokens <<< "$command"
+
+# ---- strip leading env-var assignments, recording bypasses ---------------
+bypass_nondraft=""
+bypass_merge=""
+bypass_force=""
+
+while [[ ${#tokens[@]} -gt 0 ]]; do
+  case "${tokens[0]}" in
+    WT_ALLOW_NONDRAFT=1|WT_ALLOW_NONDRAFT=true)
+      bypass_nondraft=1
+      tokens=("${tokens[@]:1}")
+      ;;
+    WT_ALLOW_MERGE=1|WT_ALLOW_MERGE=true)
+      bypass_merge=1
+      tokens=("${tokens[@]:1}")
+      ;;
+    WT_ALLOW_FORCE=1|WT_ALLOW_FORCE=true)
+      bypass_force=1
+      tokens=("${tokens[@]:1}")
+      ;;
+    *=*)
+      # Some other inline env-var assignment (e.g. DEBUG=1). Skip past it.
+      tokens=("${tokens[@]:1}")
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+# ---- apply rule ----------------------------------------------------------
+case "$rule" in
+  draft-prs)
+    [[ -n "$bypass_nondraft" ]] && exit 0
+    if ! has_token "--draft" "${tokens[@]:-}"; then
+      deny "wt-tools: draft PRs only. Add --draft to the command, or prefix it with WT_ALLOW_NONDRAFT=1 to bypass for this single invocation."
+    fi
+    ;;
+  no-pr-ready)
+    deny "wt-tools: gh pr ready is blocked. The user marks PRs ready manually — automation does not. No bypass available."
+    ;;
+  no-pr-merge)
+    [[ -n "$bypass_merge" ]] && exit 0
+    deny "wt-tools: gh pr merge is blocked from automation. Prefix the command with WT_ALLOW_MERGE=1 to bypass for this single invocation."
+    ;;
+  no-force-remove)
+    [[ -n "$bypass_force" ]] && exit 0
+    if has_token "--force" "${tokens[@]:-}"; then
+      deny "wt-tools: git worktree remove --force is blocked (would destroy uncommitted work). Prefix the command with WT_ALLOW_FORCE=1 to bypass for this single invocation."
+    fi
+    ;;
+  *)
+    # Unknown rule: defer. install.sh should never wire this, but don't fail closed.
+    exit 0
+    ;;
+esac
+
+exit 0

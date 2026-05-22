@@ -1,0 +1,27 @@
+# wt-tools.conf — POSIX shell-sourceable defaults.
+# Copied to ~/.config/wt-tools/wt-tools.conf by install.sh.
+# Edit the copy, not this file.
+
+# Parent directory containing your cloned repos.
+WT_ROOT="${WT_ROOT:-$HOME/projects}"
+
+# Convention for project-local worktrees inside each repo.
+WT_WORKTREE_DIR="${WT_WORKTREE_DIR:-.worktrees}"
+
+# Age thresholds (days).
+# wt-audit marks rows above this as "stale=yes".
+WT_STALE_DAYS_AUDIT="${WT_STALE_DAYS_AUDIT:-30}"
+# wt-clean uses this as the stale threshold for candidate selection.
+WT_STALE_DAYS_CLEAN="${WT_STALE_DAYS_CLEAN:-60}"
+
+# Repos to ignore in audit/clean (space-separated dir names).
+WT_IGNORE_REPOS="${WT_IGNORE_REPOS:-}"
+
+# Enforcement toggles consumed by wt-validate-bash via the hook config.
+# Disable a rule by removing or commenting the corresponding entry from
+# ~/.claude/settings.json — the toggles below are read but currently
+# advisory only (the hook is wired per-rule in settings.json).
+WT_ENFORCE_DRAFT_PRS="${WT_ENFORCE_DRAFT_PRS:-true}"
+WT_ENFORCE_NO_PR_READY="${WT_ENFORCE_NO_PR_READY:-true}"
+WT_ENFORCE_NO_PR_MERGE="${WT_ENFORCE_NO_PR_MERGE:-true}"
+WT_ENFORCE_NO_FORCE_REMOVE="${WT_ENFORCE_NO_FORCE_REMOVE:-true}"
