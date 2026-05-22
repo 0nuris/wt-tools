@@ -144,7 +144,7 @@ while IFS=$'\x1f' read -r repo path branch; do
       failures=$((failures + 1))
     fi
   fi
-done < <(jq -r '.[] | [.repo, .path, .branch] | @tsv' <<<"$filtered" | tr '\t' '\x1f')
+done < <(jq -r '.[] | [.repo, .path, .branch] | @tsv' <<<"$filtered" | tr '\t' $'\x1f')
 
 if (( failures > 0 )); then
   echo

@@ -129,7 +129,7 @@ emit_worktrees_for_repo() {
     esac
 
     local stale="no"
-    if (( age_days > WT_STALE_DAYS_AUDIT )); then
+    if (( age_days >= WT_STALE_DAYS_AUDIT )); then
       stale="yes"
     fi
 
@@ -185,6 +185,10 @@ for d in "$WT_ROOT"/*/; do
 
   [[ -n "$ONLY_REPO" && "$repo_name" != "$ONLY_REPO" ]] && continue
   repo_is_ignored "$repo_name" && continue
+
+  # Canonicalize the per-repo path so the sibling-dir comparison matches
+  # the porcelain paths git emits (macOS /var vs /private/var, symlinks).
+  d="$(cd "$d" 2>/dev/null && pwd -P)" || continue
 
   # Must be a git working tree
   git -C "$d" rev-parse --git-dir >/dev/null 2>&1 || continue
