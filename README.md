@@ -42,7 +42,7 @@ The skill ships with `<tracker-…>` placeholders. After install, open `~/.claud
 The 60-second flow:
 
 ```bash
-git clone https://github.com/<your-fork-owner>/wt-tools ~/projects/wt-tools
+git clone https://github.com/0nuris/wt-tools ~/projects/wt-tools
 cd ~/projects/wt-tools
 bash install.sh                 # interactive — see "What install.sh does" below
 bash tools/doctor.sh            # confirms everything's wired
