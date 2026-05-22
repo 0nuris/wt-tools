@@ -58,7 +58,7 @@ Uninstall: remove the symlinks in `$PREFIX`, restore the `.bak` settings.json fi
 
 ```bash
 wt-audit                              # table view of all linked worktrees under ~/projects
-wt-audit --repo MoveEarth             # one repo
+wt-audit --repo my-repo               # one repo
 wt-audit --json                       # machine-readable
 wt-audit --json --filter removable    # only candidates
 wt-audit --stale-days 14              # mark anything older than 14 days as stale
