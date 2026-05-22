@@ -23,6 +23,18 @@ The pitch: when you orchestrate work across multiple repos (one agent per repo, 
 - `jq`
 - Claude Code (only for the hook layer — the audit/clean scripts work standalone)
 
+### Skill dependencies (only if you use the bundled `multi-repo-dispatch` skill)
+
+The orchestration skill at `skills/multi-repo-dispatch/SKILL.md` invokes other skills by name. The skill itself documents them, but in short:
+
+| Skill | From | When needed |
+|---|---|---|
+| `using-git-worktrees` | [superpowers plugin](https://github.com/anthropics/claude-code) | always (per-agent worktree creation) |
+| `dispatching-parallel-agents` | superpowers | always (parallel fan-out discipline) |
+| `linear-identify-repos`, `linear-issue-operations`, `linear-github-coordination` | user-specific | only when picking up Linear issues; substitute your own tracker-helper skills or use explicit input mode |
+
+`wt-tools` itself (the audit/clean/validator) has no skill dependencies — those are listed only because the bundled skill references them.
+
 ## Install
 
 ```bash
