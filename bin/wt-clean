@@ -18,8 +18,14 @@ WT_TOOLS_CONFIG="${WT_TOOLS_CONFIG:-$HOME/.config/wt-tools/wt-tools.conf}"
 # shellcheck source=/dev/null
 [[ -f "$WT_TOOLS_CONFIG" ]] && . "$WT_TOOLS_CONFIG"
 
-: "${WT_ROOT:=$HOME/projects}"
 : "${WT_STALE_DAYS_CLEAN:=60}"
+: "${WT_ROOT:=}"
+
+if [[ -z "$WT_ROOT" ]]; then
+  echo "wt-clean: WT_ROOT is not set. Set it in $WT_TOOLS_CONFIG, pass --root, or" >&2
+  echo "          export WT_ROOT=... before running. Run install.sh to configure interactively." >&2
+  exit 2
+fi
 
 # Locate wt-audit (sibling of this script).
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"

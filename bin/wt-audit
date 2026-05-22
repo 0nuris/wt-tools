@@ -15,10 +15,10 @@ WT_TOOLS_CONFIG="${WT_TOOLS_CONFIG:-$HOME/.config/wt-tools/wt-tools.conf}"
 # shellcheck source=/dev/null
 [[ -f "$WT_TOOLS_CONFIG" ]] && . "$WT_TOOLS_CONFIG"
 
-: "${WT_ROOT:=$HOME/projects}"
 : "${WT_WORKTREE_DIR:=.worktrees}"
 : "${WT_STALE_DAYS_AUDIT:=30}"
 : "${WT_IGNORE_REPOS:=}"
+: "${WT_ROOT:=}"
 
 # ---- flag parsing --------------------------------------------------------
 ONLY_REPO=""
@@ -45,6 +45,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 WT_ROOT="${WT_ROOT/#~/$HOME}"
+
+if [[ -z "$WT_ROOT" ]]; then
+  echo "wt-audit: WT_ROOT is not set. Set it in $WT_TOOLS_CONFIG, pass --root, or" >&2
+  echo "          export WT_ROOT=... before running. Run install.sh to configure interactively." >&2
+  exit 2
+fi
 
 # ---- helpers -------------------------------------------------------------
 NOW="$(date +%s)"

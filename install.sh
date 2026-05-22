@@ -240,30 +240,29 @@ else
     cp "$WT_TOOLS_HOME/config/wt-tools.conf.example" "$CONFIG_PATH"
     echo "  copy: $CONFIG_PATH"
 
-    # WT_ROOT detection / prompt. Common conventions in priority order;
-    # first existing dir wins as the suggested default.
-    DETECTED_ROOT=""
-    for candidate in "$HOME/projects" "$HOME/code" "$HOME/dev" "$HOME/src" "$HOME/workspace" "$HOME/git"; do
-      if [[ -d "$candidate" ]]; then
-        DETECTED_ROOT="$candidate"
-        break
+    # WT_ROOT is required and has no default — the user picks where their
+    # cloned repos live. No probing, no assumed conventions.
+    WT_ROOT_VAL="${WT_ROOT:-}"
+    if [[ -z "$WT_ROOT_VAL" ]]; then
+      if (( YES )); then
+        echo "  ERROR: --yes mode requires WT_ROOT env var (the parent dir of your cloned repos)." >&2
+        echo "         Example: WT_ROOT=\"\$HOME/code\" bash install.sh --yes" >&2
+        exit 1
       fi
-    done
-
-    WT_ROOT_VAL="${WT_ROOT:-${DETECTED_ROOT:-$HOME/projects}}"
-    if (( ! YES )); then
-      read -r -p "  Where do you keep cloned repos? [$WT_ROOT_VAL]: " ANSWER
-      [[ -n "$ANSWER" ]] && WT_ROOT_VAL="$ANSWER"
+      while [[ -z "$WT_ROOT_VAL" ]]; do
+        read -r -p "  Where do you keep cloned repos? (required, absolute path): " WT_ROOT_VAL
+        [[ -z "$WT_ROOT_VAL" ]] && echo "  (this is required — wt-audit/wt-clean have no sensible default to fall back on)"
+      done
     fi
     # Expand ~ if user typed it.
     WT_ROOT_VAL="${WT_ROOT_VAL/#~/$HOME}"
 
-    if [[ "$WT_ROOT_VAL" != "$HOME/projects" ]]; then
-      # Substitute the default in the freshly-copied config.
-      sed -i.tmp "s|WT_ROOT=\"\${WT_ROOT:-\$HOME/projects}\"|WT_ROOT=\"\${WT_ROOT:-$WT_ROOT_VAL}\"|" "$CONFIG_PATH"
-      rm -f "$CONFIG_PATH.tmp"
-      echo "        WT_ROOT set to $WT_ROOT_VAL"
-    fi
+    # Match the empty WT_ROOT="" line in the example template; replace with
+    # the user's chosen value. Escape any | in the value for sed safety.
+    SAFE_ROOT="${WT_ROOT_VAL//|/\\|}"
+    sed -i.tmp "s|^WT_ROOT=\"\"$|WT_ROOT=\"$SAFE_ROOT\"|" "$CONFIG_PATH"
+    rm -f "$CONFIG_PATH.tmp"
+    echo "        WT_ROOT set to $WT_ROOT_VAL"
 
     if [[ ! -d "$WT_ROOT_VAL" ]]; then
       echo "  warn: $WT_ROOT_VAL does not exist yet. wt-audit will find no repos until it does."

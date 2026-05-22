@@ -54,15 +54,17 @@ Where you put the clone is up to you — `install.sh` derives `WT_TOOLS_HOME` fr
 Non-interactive (CI, scripted setup):
 
 ```bash
+WT_ROOT="$HOME/code" \
 WT_TRACKER_IDENTIFY=my-identify-repos \
 WT_TRACKER_COMMENT=my-comment \
 WT_TRACKER_LINK_PRS=my-link-prs \
   bash install.sh --yes
 ```
 
-Skip the `WT_TRACKER_*` vars if you don't use a tracker — the skill's
-explicit-input mode ("apply X in repos A and B") works without them, and you
-can always wire tracker integration later with `bash tools/configure-tracker.sh`.
+`WT_ROOT` is **required** in `--yes` mode (the parent dir of your cloned
+repos — wt-audit/wt-clean have no default). The `WT_TRACKER_*` vars are
+optional; skip them if you don't use a tracker. Wire tracker integration
+later with `bash tools/configure-tracker.sh` if you change your mind.
 
 ### What `install.sh` does
 

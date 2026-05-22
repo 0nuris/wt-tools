@@ -49,6 +49,7 @@ install_log="$(
   PREFIX="$PREFIX" \
   CLAUDE_SETTINGS="$SETTINGS" \
   CONFIG_PATH="$CONFIG" \
+  WT_ROOT="$WORKDIR/repos" \
   bash "$EXTRACT/install.sh" --yes 2>&1
 )"
 echo "    ok: install completed"

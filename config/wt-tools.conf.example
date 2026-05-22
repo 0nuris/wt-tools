@@ -8,8 +8,11 @@
 #   3. <repo>/.wt-tools.local.conf                   — your overrides, gitignored
 # Env-var overrides win above all three.
 
-# Parent directory containing your cloned repos.
-WT_ROOT="${WT_ROOT:-$HOME/projects}"
+# Parent directory containing your cloned repos. REQUIRED — there is no default;
+# wt-audit and wt-clean will refuse to run with WT_ROOT unset. install.sh asks
+# for this on first run and writes the chosen value here. Example:
+#   WT_ROOT="$HOME/code"
+WT_ROOT=""
 
 # Convention for project-local worktrees inside each repo.
 WT_WORKTREE_DIR="${WT_WORKTREE_DIR:-.worktrees}"
