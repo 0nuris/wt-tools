@@ -16,11 +16,55 @@ set -euo pipefail
 # that prefer env vars). Either works.
 input="$(cat)"
 command="$(printf '%s' "$input" | jq -r '.tool_input.command // empty')"
+session_cwd="$(printf '%s' "$input" | jq -r '.cwd // empty')"
 rule="${1:-${WT_TOOLS_RULE:-}}"
 
 # If we can't process, defer to normal permission flow.
 if [[ -z "$command" || -z "$rule" ]]; then
   exit 0
+fi
+
+# ---- scope check --------------------------------------------------------
+# By default, only enforce rules when the session cwd is inside a *linked*
+# git worktree (GIT_DIR != GIT_COMMON_DIR). Main checkouts, non-git dirs,
+# and parent orchestrator dirs all defer.
+#
+# Set WT_ENFORCE_SCOPE=all (in config or env) to enforce everywhere.
+WT_TOOLS_CONFIG="${WT_TOOLS_CONFIG:-$HOME/.config/wt-tools/wt-tools.conf}"
+# shellcheck source=/dev/null
+[[ -f "$WT_TOOLS_CONFIG" ]] && . "$WT_TOOLS_CONFIG"
+: "${WT_ENFORCE_SCOPE:=worktree}"
+
+if [[ "$WT_ENFORCE_SCOPE" != "all" ]]; then
+  if [[ -z "$session_cwd" ]]; then
+    # No cwd reported → can't determine scope → defer to be safe.
+    exit 0
+  fi
+
+  git_dir="$(git -C "$session_cwd" rev-parse --absolute-git-dir 2>/dev/null || true)"
+  if [[ -z "$git_dir" ]]; then
+    # Not a git repo → not a worktree → defer.
+    exit 0
+  fi
+
+  # Submodule guard: a submodule has GIT_DIR != GIT_COMMON_DIR too, but that
+  # is "inside a submodule of a main checkout", not a linked worktree of the
+  # current repo. Treat submodules as main-session for enforcement purposes.
+  superproject="$(git -C "$session_cwd" rev-parse --show-superproject-working-tree 2>/dev/null || true)"
+  if [[ -n "$superproject" ]]; then
+    exit 0
+  fi
+
+  git_common="$(cd "$session_cwd" 2>/dev/null && git rev-parse --git-common-dir 2>/dev/null || true)"
+  if [[ -n "$git_common" && "$git_common" != /* ]]; then
+    git_common="$(cd "$session_cwd" && cd "$git_common" 2>/dev/null && pwd -P || true)"
+  fi
+
+  if [[ -z "$git_common" || "$git_dir" == "$git_common" ]]; then
+    # Main checkout (GIT_DIR == GIT_COMMON_DIR) → defer.
+    exit 0
+  fi
+  # Otherwise: linked worktree → continue to rule logic below.
 fi
 
 # ---- helpers -------------------------------------------------------------

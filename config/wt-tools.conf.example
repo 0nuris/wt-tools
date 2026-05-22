@@ -17,6 +17,13 @@ WT_STALE_DAYS_CLEAN="${WT_STALE_DAYS_CLEAN:-60}"
 # Repos to ignore in audit/clean (space-separated dir names).
 WT_IGNORE_REPOS="${WT_IGNORE_REPOS:-}"
 
+# When to enforce hook rules:
+#   worktree  (default) — only when the session cwd is inside a *linked* git
+#                          worktree. Main checkouts, parent dirs, and non-git
+#                          dirs are unaffected.
+#   all                  — enforce everywhere a matching command runs.
+WT_ENFORCE_SCOPE="${WT_ENFORCE_SCOPE:-worktree}"
+
 # Enforcement toggles consumed by wt-validate-bash via the hook config.
 # Disable a rule by removing or commenting the corresponding entry from
 # ~/.claude/settings.json — the toggles below are read but currently

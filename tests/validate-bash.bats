@@ -6,15 +6,21 @@
 
 setup() {
     VALIDATOR="$BATS_TEST_DIRNAME/../bin/wt-validate-bash"
+    # Most tests exercise rule logic in isolation. WT_ENFORCE_SCOPE=all skips
+    # the worktree-only scope check so the rule logic itself can be asserted
+    # without fixture worktrees. Dedicated scope tests below clear this.
+    export WT_ENFORCE_SCOPE=all
 }
 
 # Helper: build the JSON payload Claude Code's PreToolUse hook delivers,
-# parameterized on the command string.
+# parameterized on the command string and (optional) cwd.
 mk_input() {
-    jq -n --arg cmd "$1" '{
+    local cmd="$1" cwd="${2:-}"
+    jq -n --arg cmd "$cmd" --arg cwd "$cwd" '{
         session_id: "test",
         hook_event_name: "PreToolUse",
         tool_name: "Bash",
+        cwd: $cwd,
         tool_input: {command: $cmd}
     }'
 }
@@ -24,6 +30,13 @@ run_validator() {
     local rule="$1"; shift
     local cmd="$1"
     run bash -c "$(printf 'echo %q | bash %q %q' "$(mk_input "$cmd")" "$VALIDATOR" "$rule")"
+}
+
+# Helper: run validator with rule + command + cwd, respecting WT_ENFORCE_SCOPE
+# (the test should set it).
+run_validator_cwd() {
+    local rule="$1" cmd="$2" cwd="$3"
+    run bash -c "$(printf 'echo %q | bash %q %q' "$(mk_input "$cmd" "$cwd")" "$VALIDATOR" "$rule")"
 }
 
 # ---- draft-prs rule ------------------------------------------------------
@@ -121,6 +134,52 @@ run_validator() {
     run bash -c "echo $(printf '%q' "$input") | bash $(printf '%q' "$VALIDATOR") draft-prs"
     [ "$status" -eq 0 ]
     [ -z "$output" ]
+}
+
+# ---- scope: worktree-only enforcement ------------------------------------
+
+@test "scope: defers in a main checkout (default scope=worktree)" {
+    unset WT_ENFORCE_SCOPE
+    # Build a temp main checkout
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    git -C "$tmpdir" init -q
+    run_validator_cwd draft-prs "gh pr create --title X" "$tmpdir"
+    rm -rf "$tmpdir"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "scope: defers in a non-git directory" {
+    unset WT_ENFORCE_SCOPE
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    run_validator_cwd draft-prs "gh pr create --title X" "$tmpdir"
+    rm -rf "$tmpdir"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "scope: defers when cwd is empty" {
+    unset WT_ENFORCE_SCOPE
+    run_validator_cwd draft-prs "gh pr create --title X" ""
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "scope: enforces inside a linked worktree" {
+    unset WT_ENFORCE_SCOPE
+    local tmpdir wt
+    tmpdir="$(mktemp -d)"
+    git -C "$tmpdir" init -q -b main
+    git -C "$tmpdir" commit -q --allow-empty -m init
+    wt="$tmpdir/.worktrees/foo"
+    git -C "$tmpdir" worktree add -q "$wt" -b foo
+    run_validator_cwd draft-prs "gh pr create --title X" "$wt"
+    git -C "$tmpdir" worktree remove "$wt" 2>/dev/null || true
+    rm -rf "$tmpdir"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"deny"'* ]]
 }
 
 # ---- threat-model notes (no asserts; documentation of how evasion actually works) ----

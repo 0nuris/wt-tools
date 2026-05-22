@@ -66,9 +66,9 @@ A removable worktree must be `merged into default branch`, `upstream-gone`, or `
 
 ## The PreToolUse hook (deterministic enforcement)
 
-When installed, the hook blocks specific Bash commands from inside Claude Code:
+When installed, the hook blocks specific Bash commands from inside Claude Code — **but only when the session is running inside a linked git worktree**. Main checkouts, non-git directories, and parent-orchestrator sessions are unaffected:
 
-| Command pattern | Default | Per-invocation bypass |
+| Command pattern | Default in linked worktree | Per-invocation bypass |
 |---|---|---|
 | `gh pr create` without `--draft` | **deny** | prefix with `WT_ALLOW_NONDRAFT=1` |
 | `gh pr ready ...` | **deny** | none (the user marks PRs ready) |
@@ -76,6 +76,26 @@ When installed, the hook blocks specific Bash commands from inside Claude Code:
 | `git worktree remove --force ...` | **deny** | prefix with `WT_ALLOW_FORCE=1` |
 
 The hook uses Claude Code's `if` field to pre-filter — the validator only runs for matching commands, not on every Bash call.
+
+### Scope: why worktrees only
+
+The model writes the rules. Worktrees are the model's workspace; the main checkout is yours. Default behavior:
+
+| Session cwd | Behavior |
+|---|---|
+| `~/projects/some-repo/.worktrees/foo/` (linked worktree) | **enforce** |
+| `~/projects/some-repo/` (main checkout) | defer (no enforcement) |
+| `~/projects/` (parent orchestrator dir) | defer |
+| `~/some-random-dir/` (not a git repo) | defer |
+| inside a submodule | defer (treated as main-session) |
+
+Scope is detected by reading `cwd` from the PreToolUse JSON payload and checking whether `GIT_DIR != GIT_COMMON_DIR` (the canonical "linked worktree" signal).
+
+To enforce everywhere, set in `wt-tools.conf`:
+
+```sh
+WT_ENFORCE_SCOPE=all
+```
 
 ### Bypass mechanism (visible, auditable)
 
