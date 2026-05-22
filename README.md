@@ -37,22 +37,51 @@ The skill ships with `<tracker-…>` placeholders. After install, open `~/.claud
 
 `wt-tools` itself (the audit/clean/validator) has no skill dependencies — those are listed only because the bundled skill references them.
 
-## Install
+## Quick start
+
+The 60-second flow:
 
 ```bash
-git clone <repo-url> ~/projects/wt-tools
+git clone https://github.com/<your-fork-owner>/wt-tools ~/projects/wt-tools
 cd ~/projects/wt-tools
-bash install.sh                # interactive
-# or:  bash install.sh --yes   # accept all prompts
+bash install.sh                 # interactive — see "What install.sh does" below
+bash tools/doctor.sh            # confirms everything's wired
+wt-audit                        # smoke-test the read-only path
 ```
 
-What `install.sh` does:
+Non-interactive (CI, scripted setup):
+
+```bash
+WT_TRACKER_IDENTIFY=my-identify-repos \
+WT_TRACKER_COMMENT=my-comment \
+WT_TRACKER_LINK_PRS=my-link-prs \
+  bash install.sh --yes
+```
+
+Skip the `WT_TRACKER_*` vars if you don't use a tracker — the skill's
+explicit-input mode ("apply X in repos A and B") works without them, and you
+can always wire tracker integration later with `bash tools/configure-tracker.sh`.
+
+### What `install.sh` does
 
 1. Symlinks `bin/wt-audit` and `bin/wt-clean` into `$PREFIX` (default `~/.local/bin`).
-2. Asks whether to merge the PreToolUse hook into `~/.claude/settings.json`. Writes a timestamped `.bak` first. The merge **appends** to existing `PreToolUse` hooks — it never overwrites your config.
-3. Asks whether to copy the config template to `~/.config/wt-tools/wt-tools.conf`.
+2. Merges the PreToolUse hook into `~/.claude/settings.json` (timestamped `.bak` first). Idempotent — re-runs replace wt-tools entries, never duplicate them.
+3. Detects your GitHub owner via `gh api user` and substitutes `<your-fork-owner>` in the installed skill (prompts if `gh` not authenticated).
+4. Copies the `multi-repo-dispatch` skill from `skills/` to `~/.claude/skills/` if not already present.
+5. Prompts for the three tracker skill names and substitutes them in the installed skill. Skip any prompt with Enter; come back later via `tools/configure-tracker.sh`.
+6. Installs shell completions (bash + zsh).
+7. Copies the config template to `~/.config/wt-tools/wt-tools.conf` if not already present.
 
-Uninstall: remove the symlinks in `$PREFIX`, restore the `.bak` settings.json file, delete the config file.
+### Tools to know about
+
+| Script | What it does | When to run |
+|---|---|---|
+| `install.sh` | Full install / re-install | First time; after a `git pull` |
+| `tools/configure-tracker.sh` | Substitute the three tracker placeholders in the installed skill | When you skipped during install, or when you switch trackers |
+| `tools/doctor.sh` | Health-check the installation; report remaining placeholders | After install; whenever something feels off |
+| `tools/publish.sh` | Publish *this* repo to GitHub (for maintainers / forks) | Only when shipping changes upstream |
+
+Uninstall: remove the symlinks in `$PREFIX`, restore the `.bak` settings.json file, delete the config file, delete `~/.claude/skills/multi-repo-dispatch/`.
 
 ## Usage
 

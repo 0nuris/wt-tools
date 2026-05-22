@@ -174,6 +174,42 @@ if [[ -f "$SKILL_FILE" ]] && grep -q '<your-fork-owner>' "$SKILL_FILE"; then
   fi
 fi
 
+# ---- 2bb. tracker skill substitutions in the installed skill ------------
+if [[ -f "$SKILL_FILE" ]] && grep -q '<tracker-identify-repos>' "$SKILL_FILE"; then
+  echo
+  echo "Tracker integration"
+  echo "  The bundled skill can pick up issues from a tracker (Linear / Jira /"
+  echo "  GitHub Issues / etc.) if you have helper skills that talk to it. If you"
+  echo "  don't, explicit input mode (\"apply X in repos A, B\") still works."
+
+  TRACKER_IDENTIFY="${WT_TRACKER_IDENTIFY:-}"
+  TRACKER_COMMENT="${WT_TRACKER_COMMENT:-}"
+  TRACKER_LINK_PRS="${WT_TRACKER_LINK_PRS:-}"
+
+  if (( YES )); then
+    if [[ -z "$TRACKER_IDENTIFY$TRACKER_COMMENT$TRACKER_LINK_PRS" ]]; then
+      echo "  skip: --yes and no WT_TRACKER_* env vars set. Run tools/configure-tracker.sh later."
+    fi
+  else
+    if ask "configure tracker integration now?"; then
+      read -r -p "  Skill name for repo identification (Enter to skip): " TRACKER_IDENTIFY
+      read -r -p "  Skill name for issue commenting     (Enter to skip): " TRACKER_COMMENT
+      read -r -p "  Skill name for PR linking           (Enter to skip): " TRACKER_LINK_PRS
+    else
+      echo "  skip: tracker not configured. Run tools/configure-tracker.sh later."
+    fi
+  fi
+
+  if [[ -n "$TRACKER_IDENTIFY$TRACKER_COMMENT$TRACKER_LINK_PRS" ]]; then
+    cp "$SKILL_FILE" "$SKILL_FILE.bak.$(date +%Y%m%d-%H%M%S)"
+    [[ -n "$TRACKER_IDENTIFY" ]] && sed -i.tmp "s|<tracker-identify-repos>|$TRACKER_IDENTIFY|g" "$SKILL_FILE"
+    [[ -n "$TRACKER_COMMENT" ]]  && sed -i.tmp "s|<tracker-comment>|$TRACKER_COMMENT|g"           "$SKILL_FILE"
+    [[ -n "$TRACKER_LINK_PRS" ]] && sed -i.tmp "s|<tracker-link-prs>|$TRACKER_LINK_PRS|g"         "$SKILL_FILE"
+    rm -f "$SKILL_FILE.tmp"
+    echo "  patch: tracker skills substituted in $SKILL_FILE."
+  fi
+fi
+
 # ---- 2c. shell completions ----------------------------------------------
 echo
 if ask "install shell completions (zsh + bash)?"; then
