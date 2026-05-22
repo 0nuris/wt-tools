@@ -99,19 +99,28 @@ if ask "install Claude Code PreToolUse hook into $CLAUDE_SETTINGS?"; then
     echo "  backup: $CLAUDE_SETTINGS.bak.$ts"
 
     merged_tmp="$(mktemp)"
-    # Deep-merge: hooks arrays per event are concatenated; other top-level
-    # keys preserved. The jq below appends our PreToolUse entry rather than
-    # replacing the user's existing hooks.
+    # Idempotent merge: strip any existing wt-tools-tagged hook entries
+    # (identified by the `_wt_tools_rule` marker on each inner hook), then
+    # concat the fresh set. User's own hooks are preserved.
     jq -s '
       .[0] as $existing | .[1] as $new |
       $existing
       | .hooks //= {}
       | .hooks.PreToolUse //= []
+      | .hooks.PreToolUse |= (
+          map(
+            .hooks |= (map(select(
+              ._wt_tools_rule == null
+              and ((.command // "") | contains("wt-validate-bash") | not)
+            )))
+          )
+          | map(select(.hooks != null and (.hooks | length) > 0))
+        )
       | .hooks.PreToolUse += ($new.hooks.PreToolUse // [])
     ' "$CLAUDE_SETTINGS" "$fragment_tmp" > "$merged_tmp"
 
     mv "$merged_tmp" "$CLAUDE_SETTINGS"
-    echo "  merge: $CLAUDE_SETTINGS"
+    echo "  merge: $CLAUDE_SETTINGS (idempotent — existing wt-tools entries replaced)"
   else
     mkdir -p "$(dirname "$CLAUDE_SETTINGS")"
     cp "$fragment_tmp" "$CLAUDE_SETTINGS"

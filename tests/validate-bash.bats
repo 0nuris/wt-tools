@@ -136,6 +136,42 @@ run_validator_cwd() {
     [ -z "$output" ]
 }
 
+# ---- sanity: defer when the rule's target command is not in the input ----
+
+@test "sanity: draft-prs defers on a command without 'gh pr create' tokens" {
+    # If Claude Code's if-filter ever spuriously routes a non-matching command
+    # here, the validator should defer cleanly instead of denying everything
+    # that lacks --draft.
+    run_validator draft-prs "echo done; git -C /tmp diff --stat"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "sanity: no-pr-ready defers on a command without 'gh pr ready' tokens" {
+    run_validator no-pr-ready "echo gh pr something-else"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "sanity: no-pr-merge defers on unrelated command" {
+    run_validator no-pr-merge "git log --oneline"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "sanity: no-force-remove defers on unrelated command" {
+    run_validator no-force-remove "rm -rf /tmp/foo"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "sanity: draft-prs enforces when 'gh pr create' appears in compound" {
+    # Compound command where the gh pr create subcommand DOES need a --draft.
+    run_validator draft-prs "echo before; gh pr create --title X --body Y; echo after"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"deny"'* ]]
+}
+
 # ---- scope: worktree-only enforcement ------------------------------------
 
 @test "scope: defers in a main checkout (default scope=worktree)" {

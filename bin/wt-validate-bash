@@ -92,6 +92,36 @@ has_token() {
   return 1
 }
 
+# Defensive sanity check: confirm the rule's target command (e.g. "gh pr create")
+# actually appears as a sequence of consecutive tokens in the command. If it
+# does not, the if-filter routed the wrong command here and we defer. Belt-and-
+# suspenders against any Claude Code matcher quirk in compound commands.
+has_token_sequence() {
+  # Args: -- t1 t2 t3 ... -- tokens...
+  local -a target=() pool=()
+  local in_target=1 a
+  for a in "$@"; do
+    if [[ "$in_target" -eq 1 ]]; then
+      if [[ "$a" == "--" ]]; then in_target=0; else target+=("$a"); fi
+    else
+      pool+=("$a")
+    fi
+  done
+
+  local n=${#target[@]} m=${#pool[@]}
+  (( n == 0 || m < n )) && return 1
+
+  local i j ok
+  for (( i=0; i<=m-n; i++ )); do
+    ok=1
+    for (( j=0; j<n; j++ )); do
+      if [[ "${pool[i+j]}" != "${target[j]}" ]]; then ok=0; break; fi
+    done
+    (( ok )) && return 0
+  done
+  return 1
+}
+
 # ---- tokenize ------------------------------------------------------------
 # Word-split on whitespace. Best-effort; quoted args may be partial tokens,
 # but that's acceptable for our flag-presence checks (--draft, --force).
@@ -129,19 +159,24 @@ done
 # ---- apply rule ----------------------------------------------------------
 case "$rule" in
   draft-prs)
+    # Sanity: only enforce if `gh pr create` actually appears in the tokens.
+    has_token_sequence gh pr create -- "${tokens[@]:-}" || exit 0
     [[ -n "$bypass_nondraft" ]] && exit 0
     if ! has_token "--draft" "${tokens[@]:-}"; then
       deny "wt-tools: draft PRs only. Add --draft to the command, or prefix it with WT_ALLOW_NONDRAFT=1 to bypass for this single invocation."
     fi
     ;;
   no-pr-ready)
+    has_token_sequence gh pr ready -- "${tokens[@]:-}" || exit 0
     deny "wt-tools: gh pr ready is blocked. The user marks PRs ready manually — automation does not. No bypass available."
     ;;
   no-pr-merge)
+    has_token_sequence gh pr merge -- "${tokens[@]:-}" || exit 0
     [[ -n "$bypass_merge" ]] && exit 0
     deny "wt-tools: gh pr merge is blocked from automation. Prefix the command with WT_ALLOW_MERGE=1 to bypass for this single invocation."
     ;;
   no-force-remove)
+    has_token_sequence git worktree remove -- "${tokens[@]:-}" || exit 0
     [[ -n "$bypass_force" ]] && exit 0
     if has_token "--force" "${tokens[@]:-}"; then
       deny "wt-tools: git worktree remove --force is blocked (would destroy uncommitted work). Prefix the command with WT_ALLOW_FORCE=1 to bypass for this single invocation."
