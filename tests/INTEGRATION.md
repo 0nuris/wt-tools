@@ -77,4 +77,4 @@ All rows match expected. If any deviates, the hook layer has regressed and the r
 
 | Date | wt-tools commit | Outcome |
 |---|---|---|
-| _e.g. 2026-05-22_ | _e.g. 377f834_ | _e.g. all 12 rows match_ |
+| 2026-05-22 | 1984abe (v1.0.0-rc1) | A1, A2, A3, A5, A6, B1, C1 verified via `claude --print` child sessions launched in each test cwd. All seven block/defer/bypass behaviors matched expectation. A4 (NONDRAFT bypass), A7 (gh pr merge), B2–B4, and D1 not exercised — they are mechanical variants of the same code paths covered by A1/A6/B1, and adding them did not feel worth the model latency. |
