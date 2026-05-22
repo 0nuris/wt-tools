@@ -42,12 +42,14 @@ The skill ships with `<tracker-…>` placeholders. After install, open `~/.claud
 The 60-second flow:
 
 ```bash
-git clone https://github.com/0nuris/wt-tools ~/projects/wt-tools
-cd ~/projects/wt-tools
-bash install.sh                 # interactive — see "What install.sh does" below
-bash tools/doctor.sh            # confirms everything's wired
-wt-audit                        # smoke-test the read-only path
+git clone https://github.com/0nuris/wt-tools     # clones into ./wt-tools
+cd wt-tools                                       # or wherever you cloned it
+bash install.sh                                   # interactive — see below
+bash tools/doctor.sh                              # confirms everything's wired
+wt-audit                                          # smoke-test the read-only path
 ```
+
+Where you put the clone is up to you — `install.sh` derives `WT_TOOLS_HOME` from its own location at run time, so the absolute path is captured wherever it lives.
 
 Non-interactive (CI, scripted setup):
 

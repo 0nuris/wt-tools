@@ -230,7 +230,7 @@ else
   echo "  skip: completions not installed. Source manually from $WT_TOOLS_HOME/completions/ if desired."
 fi
 
-# ---- 3. copy config template --------------------------------------------
+# ---- 3. copy + customize config template --------------------------------
 echo
 if [[ -f "$CONFIG_PATH" ]]; then
   echo "  ok:   $CONFIG_PATH (already present, not overwriting)"
@@ -239,6 +239,35 @@ else
     mkdir -p "$(dirname "$CONFIG_PATH")"
     cp "$WT_TOOLS_HOME/config/wt-tools.conf.example" "$CONFIG_PATH"
     echo "  copy: $CONFIG_PATH"
+
+    # WT_ROOT detection / prompt. Common conventions in priority order;
+    # first existing dir wins as the suggested default.
+    DETECTED_ROOT=""
+    for candidate in "$HOME/projects" "$HOME/code" "$HOME/dev" "$HOME/src" "$HOME/workspace" "$HOME/git"; do
+      if [[ -d "$candidate" ]]; then
+        DETECTED_ROOT="$candidate"
+        break
+      fi
+    done
+
+    WT_ROOT_VAL="${WT_ROOT:-${DETECTED_ROOT:-$HOME/projects}}"
+    if (( ! YES )); then
+      read -r -p "  Where do you keep cloned repos? [$WT_ROOT_VAL]: " ANSWER
+      [[ -n "$ANSWER" ]] && WT_ROOT_VAL="$ANSWER"
+    fi
+    # Expand ~ if user typed it.
+    WT_ROOT_VAL="${WT_ROOT_VAL/#~/$HOME}"
+
+    if [[ "$WT_ROOT_VAL" != "$HOME/projects" ]]; then
+      # Substitute the default in the freshly-copied config.
+      sed -i.tmp "s|WT_ROOT=\"\${WT_ROOT:-\$HOME/projects}\"|WT_ROOT=\"\${WT_ROOT:-$WT_ROOT_VAL}\"|" "$CONFIG_PATH"
+      rm -f "$CONFIG_PATH.tmp"
+      echo "        WT_ROOT set to $WT_ROOT_VAL"
+    fi
+
+    if [[ ! -d "$WT_ROOT_VAL" ]]; then
+      echo "  warn: $WT_ROOT_VAL does not exist yet. wt-audit will find no repos until it does."
+    fi
   else
     echo "  skip: config not copied (defaults will apply)."
   fi

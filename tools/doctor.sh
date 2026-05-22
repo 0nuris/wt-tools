@@ -85,6 +85,18 @@ if [[ -f "$CONFIG_PATH" ]]; then
   else
     check "config syntactically valid" fail "source fails — check shell syntax"
   fi
+  # Inspect effective WT_ROOT.
+  EFFECTIVE_ROOT="$( . "$CONFIG_PATH" 2>/dev/null; printf '%s' "${WT_ROOT:-$HOME/projects}" )"
+  if [[ -d "$EFFECTIVE_ROOT" ]]; then
+    repo_count=$(find "$EFFECTIVE_ROOT" -mindepth 1 -maxdepth 2 -type d -name '.git' 2>/dev/null | wc -l | tr -d ' ')
+    if (( repo_count > 0 )); then
+      check "WT_ROOT=$EFFECTIVE_ROOT" ok "$repo_count git repos detected at depth ≤ 2"
+    else
+      check "WT_ROOT=$EFFECTIVE_ROOT" warn "directory exists but contains no git repos — wt-audit will be empty"
+    fi
+  else
+    check "WT_ROOT=$EFFECTIVE_ROOT" warn "directory does not exist — edit $CONFIG_PATH or set WT_ROOT in env"
+  fi
 else
   check "$CONFIG_PATH" warn "not installed — defaults will apply (WT_ROOT=\$HOME/projects)"
 fi
