@@ -1,6 +1,12 @@
 # wt-tools.conf — POSIX shell-sourceable defaults.
 # Copied to ~/.config/wt-tools/wt-tools.conf by install.sh.
 # Edit the copy, not this file.
+#
+# Three-layer precedence (last wins):
+#   1. This file (~/.config/wt-tools/wt-tools.conf) — global default
+#   2. <repo>/.wt-tools.conf                         — team-shared, committed
+#   3. <repo>/.wt-tools.local.conf                   — your overrides, gitignored
+# Env-var overrides win above all three.
 
 # Parent directory containing your cloned repos.
 WT_ROOT="${WT_ROOT:-$HOME/projects}"

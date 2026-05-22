@@ -209,7 +209,16 @@ for d in "$WT_ROOT"/*/; do
 
   while IFS= read -r rec; do
     records=$(jq -c --argjson rec "$rec" '. + [$rec]' <<<"$records")
-  done < <(emit_worktrees_for_repo "$d" "$repo_name" "$default_branch")
+  done < <(
+    # Per-repo config layering: .wt-tools.conf (committed) then
+    # .wt-tools.local.conf (gitignored). Scoped to a subshell so per-repo
+    # overrides don't bleed into the next repo's processing.
+    (
+      [[ -f "$d/.wt-tools.conf" ]] && . "$d/.wt-tools.conf"
+      [[ -f "$d/.wt-tools.local.conf" ]] && . "$d/.wt-tools.local.conf"
+      emit_worktrees_for_repo "$d" "$repo_name" "$default_branch"
+    )
+  )
 done
 
 # ---- filter --------------------------------------------------------------
@@ -252,3 +261,11 @@ while IFS=$'\x1f' read -r repo path branch age merged upstream dirty detached si
   printf '%-22s %-50s %-20s %5s  %-7s %-7s %-7s %-6s %-7s\n' \
     "$repo" "$path" "$branch" "${age}d" "$merged" "$upstream" "$dirty" "$detached" "$sibling"
 done
+
+# Summary footer (suppressed in --filter removable mode — that view IS the candidate list).
+if ! (( FILTER_REMOVABLE )); then
+  total=$(jq 'length' <<<"$records")
+  removable_count=$(jq '[.[] | select(.removable == "yes")] | length' <<<"$records")
+  echo
+  echo "$total worktrees total, $removable_count removable (run with --filter removable for the candidate list)."
+fi

@@ -131,17 +131,35 @@ This kills every hook for that scope (project / user / managed). Re-enable by re
 
 ## Configuration
 
-`~/.config/wt-tools/wt-tools.conf` — sourced by all scripts.
+Three layers, in order of precedence (last wins):
+
+1. **Global** — `~/.config/wt-tools/wt-tools.conf`. Installed by `install.sh`.
+2. **Repo-shared** — `<repo>/.wt-tools.conf`. Committed to the repo so a whole team picks up the same overrides.
+3. **Repo-personal** — `<repo>/.wt-tools.local.conf`. Gitignored; your private toggles on top of the team's shared config.
+
+All three are POSIX-shell-sourceable. Common knobs:
 
 ```sh
 WT_ROOT="$HOME/projects"
 WT_WORKTREE_DIR=".worktrees"
 WT_STALE_DAYS_AUDIT=30
 WT_STALE_DAYS_CLEAN=60
+WT_ENFORCE_SCOPE="worktree"   # or "all"
 WT_IGNORE_REPOS=""
 ```
 
-Any value can be overridden per-invocation via env var, e.g. `WT_ROOT=/tmp/test wt-audit`.
+Any value can be overridden per-invocation via env var: `WT_ROOT=/tmp/test wt-audit`.
+
+**Worked example.** Repo `core-api` allows non-draft PRs while everywhere else stays strict:
+
+```sh
+# ~/projects/core-api/.wt-tools.conf  (committed)
+# Reason: hotfix workflow requires immediate ready PRs.
+# Note: this only affects validate-bash when run from a worktree inside core-api.
+WT_ENFORCE_SCOPE="all"
+```
+
+…then in `~/projects/core-api/.wt-tools.local.conf` (gitignored) a single dev might further override `WT_STALE_DAYS_AUDIT` for their own audit habits without affecting teammates.
 
 ## Layout assumptions
 

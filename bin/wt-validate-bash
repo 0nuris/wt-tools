@@ -33,6 +33,26 @@ fi
 WT_TOOLS_CONFIG="${WT_TOOLS_CONFIG:-$HOME/.config/wt-tools/wt-tools.conf}"
 # shellcheck source=/dev/null
 [[ -f "$WT_TOOLS_CONFIG" ]] && . "$WT_TOOLS_CONFIG"
+
+# Per-repo config layering: when cwd is inside a git repo, walk up to find
+# the repo root (or, if inside a linked worktree, its common-dir's parent)
+# and source .wt-tools.conf then .wt-tools.local.conf if present.
+if [[ -n "${session_cwd:-}" ]]; then
+  _repo_root=""
+  if _common="$(cd "$session_cwd" 2>/dev/null && git rev-parse --git-common-dir 2>/dev/null)"; then
+    if [[ -n "$_common" && "$_common" != /* ]]; then
+      _common="$(cd "$session_cwd" && cd "$_common" 2>/dev/null && pwd -P || true)"
+    fi
+    [[ -n "$_common" ]] && _repo_root="$(dirname "$_common")"
+  fi
+  if [[ -n "$_repo_root" ]]; then
+    # shellcheck source=/dev/null
+    [[ -f "$_repo_root/.wt-tools.conf" ]] && . "$_repo_root/.wt-tools.conf"
+    # shellcheck source=/dev/null
+    [[ -f "$_repo_root/.wt-tools.local.conf" ]] && . "$_repo_root/.wt-tools.local.conf"
+  fi
+fi
+
 : "${WT_ENFORCE_SCOPE:=worktree}"
 
 if [[ "$WT_ENFORCE_SCOPE" != "all" ]]; then

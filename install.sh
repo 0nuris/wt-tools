@@ -132,6 +132,55 @@ else
   echo "  skip: hook not installed."
 fi
 
+# ---- 2b. patch installed skill callout with detected GitHub owner -------
+SKILL_FILE="${SKILL_FILE:-$HOME/.claude/skills/multi-repo-dispatch/SKILL.md}"
+if [[ -f "$SKILL_FILE" ]] && grep -q '<your-fork-owner>' "$SKILL_FILE"; then
+  echo
+  if ask "patch $SKILL_FILE wt-tools link with your GitHub owner?"; then
+    OWNER=""
+    if command -v gh >/dev/null 2>&1; then
+      OWNER="$(gh api user --jq .login 2>/dev/null || true)"
+    fi
+    if [[ -z "$OWNER" ]]; then
+      if (( YES )); then
+        echo "  warn: gh not authenticated and --yes passed — leaving placeholder."
+        echo "        run install.sh again without --yes (or after 'gh auth login') to patch."
+      else
+        read -r -p "  GitHub owner (org or username): " OWNER
+      fi
+    fi
+    if [[ -n "$OWNER" ]]; then
+      cp "$SKILL_FILE" "$SKILL_FILE.bak.$(date +%Y%m%d-%H%M%S)"
+      # sed -i differs between GNU and BSD; use the portable two-arg form.
+      sed -i.tmp "s|<your-fork-owner>/wt-tools|$OWNER/wt-tools|g" "$SKILL_FILE"
+      rm -f "$SKILL_FILE.tmp"
+      echo "  patch: $SKILL_FILE (owner = $OWNER)"
+    fi
+  else
+    echo "  skip: skill file left as-is."
+  fi
+fi
+
+# ---- 2c. shell completions ----------------------------------------------
+echo
+if ask "install shell completions (zsh + bash)?"; then
+  # bash
+  bash_dst="${BASH_COMPLETION_USER_DIR:-$HOME/.local/share/bash-completion/completions}/wt-tools.bash"
+  mkdir -p "$(dirname "$bash_dst")"
+  cp "$WT_TOOLS_HOME/completions/wt-tools.bash" "$bash_dst"
+  echo "  copy: $bash_dst"
+  echo "        source from ~/.bashrc:  source \"$bash_dst\""
+
+  # zsh — best-effort placement under ~/.zsh/completions/ (must be on $fpath)
+  zsh_dir="$HOME/.zsh/completions"
+  mkdir -p "$zsh_dir"
+  cp "$WT_TOOLS_HOME/completions/wt-tools.zsh" "$zsh_dir/_wt-tools"
+  echo "  copy: $zsh_dir/_wt-tools"
+  echo "        add to ~/.zshrc (once):  fpath=(\"$zsh_dir\" \$fpath); autoload -U compinit && compinit"
+else
+  echo "  skip: completions not installed. Source manually from $WT_TOOLS_HOME/completions/ if desired."
+fi
+
 # ---- 3. copy config template --------------------------------------------
 echo
 if [[ -f "$CONFIG_PATH" ]]; then
