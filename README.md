@@ -125,6 +125,8 @@ When installed, the hook blocks specific Bash commands from inside Claude Code â
 
 The hook uses Claude Code's `if` field to pre-filter â€” the validator only runs for matching commands, not on every Bash call.
 
+wt-tools identifies its own hook entries by the `wt-validate-bash` path in `.command`, since Claude Code's settings serializer doesn't preserve custom keys on round-trip.
+
 ### Scope: why worktrees only
 
 The model writes the rules. Worktrees are the model's workspace; the main checkout is yours. Default behavior:

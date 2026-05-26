@@ -113,16 +113,38 @@ fi
 # ---- 4. Claude Code hook ------------------------------------------------
 echo
 echo "hook:"
+# Identification is by the wt-validate-bash substring in .command, NOT by a
+# marker field. Claude Code's settings serializer strips unknown JSON keys
+# on round-trip (e.g. when the user toggles a CC setting), so any custom
+# marker we add disappears at the first write. The command path is a known
+# field and survives, and the rule name is the command's last token.
+EXPECTED_RULES="draft-prs no-force-remove no-pr-merge no-pr-ready"
 if [[ -f "$CLAUDE_SETTINGS" ]]; then
   check "$CLAUDE_SETTINGS" ok
   if jq -e '.hooks.PreToolUse' "$CLAUDE_SETTINGS" >/dev/null 2>&1; then
-    n=$(jq '[.hooks.PreToolUse[].hooks[] | select(._wt_tools_rule != null)] | length' "$CLAUDE_SETTINGS")
-    if [[ "$n" == "4" ]]; then
-      check "wt-tools hook entries" ok "4 rules wired (draft-prs, no-pr-ready, no-pr-merge, no-force-remove)"
-    elif [[ "$n" == "0" ]]; then
-      check "wt-tools hook entries" fail "none found — run install.sh"
+    found_rules="$(jq -r '
+      [.hooks.PreToolUse[]?.hooks[]?.command
+        | select(. != null and contains("wt-validate-bash"))
+        | split(" ") | last]
+      | sort | unique | join(" ")
+    ' "$CLAUDE_SETTINGS")"
+    if [[ "$found_rules" == "$EXPECTED_RULES" ]]; then
+      check "wt-tools hook entries" ok "4 rules wired ($found_rules)"
+    elif [[ -z "$found_rules" ]]; then
+      check "wt-tools hook entries" fail "no wt-validate-bash entries — run install.sh"
     else
-      check "wt-tools hook entries" warn "$n of 4 wired — re-run install.sh"
+      missing=""
+      for r in $EXPECTED_RULES; do
+        case " $found_rules " in *" $r "*) ;; *) missing="$missing $r" ;; esac
+      done
+      extra=""
+      for r in $found_rules; do
+        case " $EXPECTED_RULES " in *" $r "*) ;; *) extra="$extra $r" ;; esac
+      done
+      detail="found: $found_rules"
+      [[ -n "$missing" ]] && detail="$detail; missing:$missing"
+      [[ -n "$extra" ]]   && detail="$detail; unexpected:$extra"
+      check "wt-tools hook entries" warn "$detail — re-run install.sh"
     fi
   else
     check "PreToolUse hooks key" fail "no .hooks.PreToolUse in settings — run install.sh"
