@@ -7,22 +7,22 @@
           {
             "type": "command",
             "if": "Bash(gh pr create*)",
-            "command": "bash __WT_TOOLS_HOME__/bin/wt-validate-bash draft-prs"
+            "command": "bash \"__WT_TOOLS_HOME__/bin/wt-validate-bash\" draft-prs"
           },
           {
             "type": "command",
             "if": "Bash(gh pr ready*)",
-            "command": "bash __WT_TOOLS_HOME__/bin/wt-validate-bash no-pr-ready"
+            "command": "bash \"__WT_TOOLS_HOME__/bin/wt-validate-bash\" no-pr-ready"
           },
           {
             "type": "command",
             "if": "Bash(gh pr merge*)",
-            "command": "bash __WT_TOOLS_HOME__/bin/wt-validate-bash no-pr-merge"
+            "command": "bash \"__WT_TOOLS_HOME__/bin/wt-validate-bash\" no-pr-merge"
           },
           {
             "type": "command",
             "if": "Bash(git worktree remove*)",
-            "command": "bash __WT_TOOLS_HOME__/bin/wt-validate-bash no-force-remove"
+            "command": "bash \"__WT_TOOLS_HOME__/bin/wt-validate-bash\" no-force-remove"
           }
         ]
       }
