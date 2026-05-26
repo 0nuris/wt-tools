@@ -85,7 +85,7 @@ later with `bash tools/configure-tracker.sh` if you change your mind.
 | `tools/doctor.sh` | Health-check the installation; report remaining placeholders | After install; whenever something feels off |
 | `tools/publish.sh` | Publish *this* repo to GitHub (for maintainers / forks) | Only when shipping changes upstream |
 
-Uninstall: remove the symlinks in `$PREFIX`, restore the `.bak` settings.json file, delete the config file, delete `~/.claude/skills/multi-repo-dispatch/`.
+Uninstall: `bash tools/uninstall.sh` (conservative — strips the hook + symlinks, keeps config/skill/completions). Add `--remove-config`, `--remove-skill`, `--remove-completions` to wipe those too. Pass `--yes` for non-interactive. Same `PREFIX` / `CLAUDE_SETTINGS` / `CONFIG_PATH` / `SKILL_FILE` env overrides as install.
 
 ## Usage
 
