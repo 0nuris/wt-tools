@@ -16,6 +16,12 @@ CLAUDE_SETTINGS="${CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
 CONFIG_PATH="${CONFIG_PATH:-$HOME/.config/wt-tools/wt-tools.conf}"
 SKILL_FILE="${SKILL_FILE:-$HOME/.claude/skills/multi-repo-dispatch/SKILL.md}"
 
+# Threshold for the sibling-dir mismatch heuristic. If ≥ this fraction of
+# linked worktrees are outside the configured WT_WORKTREE_DIR (and there
+# are at least 2 such worktrees), doctor flags a possible convention
+# mismatch. 30 = 30%.
+SIBLING_DIR_WARN_PCT="${SIBLING_DIR_WARN_PCT:-30}"
+
 red()   { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
 yellow(){ printf '\033[33m%s\033[0m\n' "$*"; }
@@ -85,9 +91,12 @@ if [[ -f "$CONFIG_PATH" ]]; then
   else
     check "config syntactically valid" fail "source fails — check shell syntax"
   fi
-  # Inspect effective WT_ROOT.
-  EFFECTIVE_ROOT="$( . "$CONFIG_PATH" 2>/dev/null; printf '%s' "${WT_ROOT:-$HOME/projects}" )"
-  if [[ -d "$EFFECTIVE_ROOT" ]]; then
+  # Inspect effective WT_ROOT and WT_WORKTREE_DIR.
+  EFFECTIVE_ROOT="$(    . "$CONFIG_PATH" 2>/dev/null; printf '%s' "${WT_ROOT:-}" )"
+  EFFECTIVE_WT_DIR="$(  . "$CONFIG_PATH" 2>/dev/null; printf '%s' "${WT_WORKTREE_DIR:-.worktrees}" )"
+  if [[ -z "$EFFECTIVE_ROOT" ]]; then
+    check "WT_ROOT" fail "not set — edit $CONFIG_PATH or export WT_ROOT (no default; required)"
+  elif [[ -d "$EFFECTIVE_ROOT" ]]; then
     repo_count=$(find "$EFFECTIVE_ROOT" -mindepth 1 -maxdepth 2 -type d -name '.git' 2>/dev/null | wc -l | tr -d ' ')
     if (( repo_count > 0 )); then
       check "WT_ROOT=$EFFECTIVE_ROOT" ok "$repo_count git repos detected at depth ≤ 2"
@@ -98,7 +107,7 @@ if [[ -f "$CONFIG_PATH" ]]; then
     check "WT_ROOT=$EFFECTIVE_ROOT" warn "directory does not exist — edit $CONFIG_PATH or set WT_ROOT in env"
   fi
 else
-  check "$CONFIG_PATH" warn "not installed — defaults will apply (WT_ROOT=\$HOME/projects)"
+  check "$CONFIG_PATH" warn "not installed — wt-audit / wt-clean require WT_ROOT (set in env or run install.sh)"
 fi
 
 # ---- 4. Claude Code hook ------------------------------------------------
@@ -136,6 +145,37 @@ if [[ -f "$SKILL_FILE" ]]; then
   fi
 else
   check "$SKILL_FILE" warn "not installed — run install.sh"
+fi
+
+# ---- 6. convention sanity (sibling-dir ratio) ---------------------------
+echo
+echo "convention:"
+# This check is informational. It only runs when wt-audit is installed and
+# WT_ROOT is set + populated — otherwise earlier sections have already
+# raised the relevant warning.
+if [[ -x "$PREFIX/wt-audit" || -L "$PREFIX/wt-audit" ]] \
+   && [[ -n "${EFFECTIVE_ROOT:-}" ]] && [[ -d "${EFFECTIVE_ROOT:-}" ]]; then
+  audit_json="$( WT_TOOLS_CONFIG="$CONFIG_PATH" bash "$PREFIX/wt-audit" --json 2>/dev/null )"
+  if [[ -n "$audit_json" ]] && total=$(jq 'length' <<<"$audit_json" 2>/dev/null) && [[ "$total" =~ ^[0-9]+$ ]]; then
+    if (( total == 0 )); then
+      check "sibling-dir convention" ok "no linked worktrees to evaluate"
+    else
+      sibling=$(jq '[.[] | select(.sibling_dir == "yes")] | length' <<<"$audit_json" 2>/dev/null || echo 0)
+      pct=$(( sibling * 100 / total ))
+      if (( sibling >= 2 )) && (( pct >= SIBLING_DIR_WARN_PCT )); then
+        check "sibling-dir convention" warn "$sibling of $total worktrees ($pct%) live outside WT_WORKTREE_DIR='$EFFECTIVE_WT_DIR'"
+        echo "      Either your repos use a different convention (e.g. 'worktrees/' without the dot, or"
+        echo "      a sibling directory next to the repo) — set WT_WORKTREE_DIR in $CONFIG_PATH —"
+        echo "      or they're intentional one-offs and you can ignore this."
+      else
+        check "sibling-dir convention" ok "$sibling of $total worktrees outside WT_WORKTREE_DIR='$EFFECTIVE_WT_DIR'"
+      fi
+    fi
+  else
+    check "sibling-dir convention" warn "wt-audit --json produced no parseable output — skipping"
+  fi
+else
+  check "sibling-dir convention" ok "skipped (wt-audit not installed or WT_ROOT unset/missing)"
 fi
 
 # ---- summary ------------------------------------------------------------
