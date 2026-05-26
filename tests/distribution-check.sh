@@ -33,18 +33,15 @@ echo "  workdir: $WORKDIR"
 echo
 
 # --- 1. tar + extract -----------------------------------------------------
-echo "[1/6] tar + extract"
+echo "[1/7] tar + extract"
 ( cd "$SOURCE_DIR" && tar -cf "$WORKDIR/wt-tools.tar" \
     --exclude='.git' --exclude='.worktrees' \
-    bin hooks config tests completions install.sh README.md LICENSE 2>/dev/null \
-  || tar -cf "$WORKDIR/wt-tools.tar" \
-    --exclude='.git' --exclude='.worktrees' \
-    bin hooks config tests install.sh README.md LICENSE )
+    bin hooks config tests completions tools skills install.sh README.md LICENSE )
 tar -xf "$WORKDIR/wt-tools.tar" -C "$EXTRACT"
 echo "    ok: extracted to $EXTRACT"
 
 # --- 2. run install.sh with overrides ------------------------------------
-echo "[2/6] run install.sh"
+echo "[2/7] run install.sh"
 install_log="$(
   PREFIX="$PREFIX" \
   CLAUDE_SETTINGS="$SETTINGS" \
@@ -55,7 +52,7 @@ install_log="$(
 echo "    ok: install completed"
 
 # --- 3. symlinks resolve to extraction dir -------------------------------
-echo "[3/6] symlinks resolve to extraction dir"
+echo "[3/7] symlinks resolve to extraction dir"
 for s in wt-audit wt-clean; do
   target="$(readlink "$PREFIX/$s")"
   if [[ "$target" != "$EXTRACT/bin/$s" ]]; then
@@ -66,7 +63,7 @@ done
 echo "    ok: both symlinks point into $EXTRACT"
 
 # --- 4. settings.json hook commands reference extraction dir -------------
-echo "[4/6] settings.json hook commands reference extraction dir"
+echo "[4/7] settings.json hook commands reference extraction dir"
 if ! jq -e --arg ex "$EXTRACT" '
   [.hooks.PreToolUse[].hooks[].command]
   | all(. | contains($ex))
@@ -79,7 +76,7 @@ fi
 echo "    ok: all hook commands reference $EXTRACT"
 
 # --- 5. no path leaks from SOURCE_DIR ------------------------------------
-echo "[5/6] no SOURCE_DIR path leaks in install artifacts"
+echo "[5/7] no SOURCE_DIR path leaks in install artifacts"
 leak_found=0
 for f in "$SETTINGS" "$CONFIG" "$PREFIX/wt-audit" "$PREFIX/wt-clean"; do
   if [[ -f "$f" || -L "$f" ]]; then
@@ -99,7 +96,7 @@ fi
 echo "    ok: no SOURCE_DIR references found"
 
 # --- 6. scripts execute from new prefix ---------------------------------
-echo "[6/6] symlinked scripts execute and source the test config"
+echo "[6/7] symlinked scripts execute and source the test config"
 WT_TOOLS_CONFIG="$CONFIG" \
 WT_ROOT="$WORKDIR" \
 bash "$PREFIX/wt-audit" >/dev/null 2>&1 || {
@@ -107,6 +104,18 @@ bash "$PREFIX/wt-audit" >/dev/null 2>&1 || {
   exit 1
 }
 echo "    ok: wt-audit runs from $PREFIX"
+
+# --- 7. tools/ and skills/ landed in the tar -----------------------------
+echo "[7/7] tar includes tools/ and skills/"
+missing=0
+for path in tools/uninstall.sh tools/doctor.sh tools/configure-tracker.sh tools/publish.sh skills/multi-repo-dispatch/SKILL.md; do
+  if [[ ! -e "$EXTRACT/$path" ]]; then
+    echo "    FAIL: $path missing from extracted tar" >&2
+    missing=$((missing + 1))
+  fi
+done
+(( missing )) && exit 1
+echo "    ok: tools/ and skills/ both present"
 
 echo
 echo "distribution check PASSED"

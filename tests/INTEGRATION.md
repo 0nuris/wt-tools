@@ -63,6 +63,33 @@ Edit `~/.config/wt-tools/wt-tools.conf`, set `WT_ENFORCE_SCOPE=all`, then in a f
 
 Reset `WT_ENFORCE_SCOPE=worktree` when done.
 
+## F. Install path contains a space (hook command quoting)
+
+The hook fragment wraps `__WT_TOOLS_HOME__` in double quotes specifically so installs into spaced paths still produce a one-argument `bash <path> <rule>` invocation. Regressions here would silently bypass enforcement.
+
+Setup (note the literal space in the parent dir):
+
+```bash
+mkdir -p "/tmp/wt tools-spaced"
+git clone https://github.com/0nuris/wt-tools.git "/tmp/wt tools-spaced/wt-tools"
+cd "/tmp/wt tools-spaced/wt-tools"
+mkdir -p "/tmp/wt tools-spaced/repos"
+WT_ROOT="/tmp/wt tools-spaced/repos" bash install.sh --yes
+git init -q -b main "/tmp/wt tools-spaced/repos/testrepo"
+git -C "/tmp/wt tools-spaced/repos/testrepo" commit -q --allow-empty -m init
+git -C "/tmp/wt tools-spaced/repos/testrepo" worktree add -q .worktrees/feature -b feature
+```
+
+In a fresh Claude Code session launched with `cd "/tmp/wt tools-spaced/repos/testrepo/.worktrees/feature"`:
+
+| # | Command attempted | Expected |
+|---|---|---|
+| F1 | `gh pr create --title test --body test` | denied; reason mentions `--draft`; confirms the quoted path in `command` survives Claude Code's hook dispatch |
+
+A failure here means the hook command split on whitespace and the validator was never invoked — settings.json `command` field needs re-verification.
+
+Teardown: re-run `bash tools/uninstall.sh --yes --remove-config --remove-skill` from the spaced clone, then `rm -rf "/tmp/wt tools-spaced"`.
+
 ## Teardown
 
 ```bash
