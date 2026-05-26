@@ -51,6 +51,40 @@ ask() {
   [[ "$reply" =~ ^[Yy] ]]
 }
 
+# ---- input + substitution helpers ----------------------------------------
+require_absolute() {
+  # $1 = value, $2 = label. Returns 0 if absolute, 1 + diagnostic otherwise.
+  case "$1" in
+    /*) return 0 ;;
+    *)  echo "  ERROR: $2 must be an absolute path (got: $1)." >&2; return 1 ;;
+  esac
+}
+
+sed_escape_replacement() {
+  # Escape the chars sed interprets in a replacement string with | delimiter.
+  # \ and & are sed-special; | is our chosen delimiter.
+  printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'
+}
+
+verify_substitution() {
+  # $1 = file, $2 = fixed string that must be present after, $3 = label.
+  if ! grep -Fq -- "$2" "$1"; then
+    echo "  ERROR: $3 substitution did not take effect in $1." >&2
+    echo "         Expected to find: $2" >&2
+    echo "         (template may have changed shape — file an issue if you reach this)" >&2
+    exit 1
+  fi
+}
+
+verify_placeholder_removed() {
+  # $1 = file, $2 = fixed string that must NO LONGER be present, $3 = label.
+  if grep -Fq -- "$2" "$1"; then
+    echo "  ERROR: $3 substitution did not take effect in $1." >&2
+    echo "         Still contains placeholder: $2" >&2
+    exit 1
+  fi
+}
+
 # ---- 1. symlink bin/ -----------------------------------------------------
 echo "wt-tools installer"
 echo "  WT_TOOLS_HOME: $WT_TOOLS_HOME"
@@ -165,9 +199,11 @@ if [[ -f "$SKILL_FILE" ]] && grep -q '<your-fork-owner>' "$SKILL_FILE"; then
     fi
     if [[ -n "$OWNER" ]]; then
       cp "$SKILL_FILE" "$SKILL_FILE.bak.$(date +%Y%m%d-%H%M%S)"
+      SAFE_OWNER="$(sed_escape_replacement "$OWNER")"
       # sed -i differs between GNU and BSD; use the portable two-arg form.
-      sed -i.tmp "s|<your-fork-owner>/wt-tools|$OWNER/wt-tools|g" "$SKILL_FILE"
+      sed -i.tmp "s|<your-fork-owner>/wt-tools|$SAFE_OWNER/wt-tools|g" "$SKILL_FILE"
       rm -f "$SKILL_FILE.tmp"
+      verify_placeholder_removed "$SKILL_FILE" "<your-fork-owner>/wt-tools" "owner"
       echo "  patch: $SKILL_FILE (owner = $OWNER)"
     fi
   else
@@ -176,7 +212,9 @@ if [[ -f "$SKILL_FILE" ]] && grep -q '<your-fork-owner>' "$SKILL_FILE"; then
 fi
 
 # ---- 2bb. tracker skill substitutions in the installed skill ------------
-if [[ -f "$SKILL_FILE" ]] && grep -q '<tracker-identify-repos>' "$SKILL_FILE"; then
+# Gate on ANY tracker placeholder remaining — a previous partial run may
+# have substituted some but not others.
+if [[ -f "$SKILL_FILE" ]] && grep -qE '<tracker-(identify-repos|comment|link-prs)>' "$SKILL_FILE"; then
   echo
   echo "Tracker integration"
   echo "  The bundled skill can pick up issues from a tracker (Linear / Jira /"
@@ -203,9 +241,21 @@ if [[ -f "$SKILL_FILE" ]] && grep -q '<tracker-identify-repos>' "$SKILL_FILE"; t
 
   if [[ -n "$TRACKER_IDENTIFY$TRACKER_COMMENT$TRACKER_LINK_PRS" ]]; then
     cp "$SKILL_FILE" "$SKILL_FILE.bak.$(date +%Y%m%d-%H%M%S)"
-    [[ -n "$TRACKER_IDENTIFY" ]] && sed -i.tmp "s|<tracker-identify-repos>|$TRACKER_IDENTIFY|g" "$SKILL_FILE"
-    [[ -n "$TRACKER_COMMENT" ]]  && sed -i.tmp "s|<tracker-comment>|$TRACKER_COMMENT|g"           "$SKILL_FILE"
-    [[ -n "$TRACKER_LINK_PRS" ]] && sed -i.tmp "s|<tracker-link-prs>|$TRACKER_LINK_PRS|g"         "$SKILL_FILE"
+    if [[ -n "$TRACKER_IDENTIFY" ]]; then
+      SAFE="$(sed_escape_replacement "$TRACKER_IDENTIFY")"
+      sed -i.tmp "s|<tracker-identify-repos>|$SAFE|g" "$SKILL_FILE"
+      verify_placeholder_removed "$SKILL_FILE" "<tracker-identify-repos>" "tracker-identify-repos"
+    fi
+    if [[ -n "$TRACKER_COMMENT" ]]; then
+      SAFE="$(sed_escape_replacement "$TRACKER_COMMENT")"
+      sed -i.tmp "s|<tracker-comment>|$SAFE|g" "$SKILL_FILE"
+      verify_placeholder_removed "$SKILL_FILE" "<tracker-comment>" "tracker-comment"
+    fi
+    if [[ -n "$TRACKER_LINK_PRS" ]]; then
+      SAFE="$(sed_escape_replacement "$TRACKER_LINK_PRS")"
+      sed -i.tmp "s|<tracker-link-prs>|$SAFE|g" "$SKILL_FILE"
+      verify_placeholder_removed "$SKILL_FILE" "<tracker-link-prs>" "tracker-link-prs"
+    fi
     rm -f "$SKILL_FILE.tmp"
     echo "  patch: tracker skills substituted in $SKILL_FILE."
   fi
@@ -233,41 +283,63 @@ fi
 
 # ---- 3. copy + customize config template --------------------------------
 echo
+
+# Prompt the user for WT_ROOT (or honor the env var), validate as absolute,
+# and rewrite the WT_ROOT=... line in $CONFIG_PATH. The sed pattern matches
+# any current value, so this works both for a fresh template (WT_ROOT="")
+# and for fixing up an existing config whose WT_ROOT got cleared somehow.
+prompt_and_set_wt_root() {
+  local val="${WT_ROOT:-}"
+  if [[ -z "$val" ]]; then
+    if (( YES )); then
+      echo "  ERROR: --yes mode requires WT_ROOT env var (the parent dir of your cloned repos)." >&2
+      echo "         Example: WT_ROOT=\"\$HOME/code\" bash install.sh --yes" >&2
+      exit 1
+    fi
+    while :; do
+      read -r -p "  Where do you keep cloned repos? (required, absolute path): " val
+      if [[ -z "$val" ]]; then
+        echo "  (this is required — wt-audit/wt-clean have no sensible default to fall back on)"
+        continue
+      fi
+      val="${val/#~/$HOME}"
+      require_absolute "$val" "WT_ROOT" || continue
+      break
+    done
+  else
+    val="${val/#~/$HOME}"
+    require_absolute "$val" "WT_ROOT" || exit 1
+  fi
+
+  local safe; safe="$(sed_escape_replacement "$val")"
+  # Match any current double-quoted value (including empty).
+  sed -i.tmp 's|^WT_ROOT="[^"]*"$|WT_ROOT="'"$safe"'"|' "$CONFIG_PATH"
+  rm -f "$CONFIG_PATH.tmp"
+  verify_substitution "$CONFIG_PATH" "WT_ROOT=\"$val\"" "WT_ROOT"
+  echo "        WT_ROOT set to $val"
+  if [[ ! -d "$val" ]]; then
+    echo "  warn: $val does not exist yet. wt-audit will find no repos until it does."
+  fi
+}
+
 if [[ -f "$CONFIG_PATH" ]]; then
-  echo "  ok:   $CONFIG_PATH (already present, not overwriting)"
+  # Config exists — inspect effective WT_ROOT and only update if empty.
+  EXISTING_WT_ROOT="$( . "$CONFIG_PATH" 2>/dev/null; printf '%s' "${WT_ROOT:-}" )"
+  if [[ -n "$EXISTING_WT_ROOT" ]] && [[ -d "$EXISTING_WT_ROOT" ]]; then
+    echo "  ok:   $CONFIG_PATH (WT_ROOT=$EXISTING_WT_ROOT, valid)"
+  elif [[ -n "$EXISTING_WT_ROOT" ]]; then
+    echo "  warn: $CONFIG_PATH has WT_ROOT=$EXISTING_WT_ROOT, but that directory does not exist."
+    echo "        wt-audit will be empty until $EXISTING_WT_ROOT is created (or WT_ROOT is changed)."
+  else
+    echo "  fix:  $CONFIG_PATH exists but WT_ROOT is empty — let's set it."
+    prompt_and_set_wt_root
+  fi
 else
   if ask "copy config template to $CONFIG_PATH?"; then
     mkdir -p "$(dirname "$CONFIG_PATH")"
     cp "$WT_TOOLS_HOME/config/wt-tools.conf.example" "$CONFIG_PATH"
     echo "  copy: $CONFIG_PATH"
-
-    # WT_ROOT is required and has no default — the user picks where their
-    # cloned repos live. No probing, no assumed conventions.
-    WT_ROOT_VAL="${WT_ROOT:-}"
-    if [[ -z "$WT_ROOT_VAL" ]]; then
-      if (( YES )); then
-        echo "  ERROR: --yes mode requires WT_ROOT env var (the parent dir of your cloned repos)." >&2
-        echo "         Example: WT_ROOT=\"\$HOME/code\" bash install.sh --yes" >&2
-        exit 1
-      fi
-      while [[ -z "$WT_ROOT_VAL" ]]; do
-        read -r -p "  Where do you keep cloned repos? (required, absolute path): " WT_ROOT_VAL
-        [[ -z "$WT_ROOT_VAL" ]] && echo "  (this is required — wt-audit/wt-clean have no sensible default to fall back on)"
-      done
-    fi
-    # Expand ~ if user typed it.
-    WT_ROOT_VAL="${WT_ROOT_VAL/#~/$HOME}"
-
-    # Match the empty WT_ROOT="" line in the example template; replace with
-    # the user's chosen value. Escape any | in the value for sed safety.
-    SAFE_ROOT="${WT_ROOT_VAL//|/\\|}"
-    sed -i.tmp "s|^WT_ROOT=\"\"$|WT_ROOT=\"$SAFE_ROOT\"|" "$CONFIG_PATH"
-    rm -f "$CONFIG_PATH.tmp"
-    echo "        WT_ROOT set to $WT_ROOT_VAL"
-
-    if [[ ! -d "$WT_ROOT_VAL" ]]; then
-      echo "  warn: $WT_ROOT_VAL does not exist yet. wt-audit will find no repos until it does."
-    fi
+    prompt_and_set_wt_root
   else
     echo "  skip: config not copied. wt-audit and wt-clean will refuse to run"
     echo "        until WT_ROOT is set (in env or a config you write later)."
