@@ -99,8 +99,9 @@ if ask "install Claude Code PreToolUse hook into $CLAUDE_SETTINGS?"; then
     echo "  backup: $CLAUDE_SETTINGS.bak.$ts"
 
     merged_tmp="$(mktemp)"
-    # Idempotent merge: strip any existing wt-tools-tagged hook entries
-    # (identified by the `_wt_tools_rule` marker on each inner hook), then
+    # Idempotent merge: strip any existing wt-tools hook entries (identified
+    # by the `wt-validate-bash` substring in .command — a reliable signal
+    # since Claude Code preserves the .command field on round-trip), then
     # concat the fresh set. User's own hooks are preserved.
     jq -s '
       .[0] as $existing | .[1] as $new |
@@ -268,7 +269,8 @@ else
       echo "  warn: $WT_ROOT_VAL does not exist yet. wt-audit will find no repos until it does."
     fi
   else
-    echo "  skip: config not copied (defaults will apply)."
+    echo "  skip: config not copied. wt-audit and wt-clean will refuse to run"
+    echo "        until WT_ROOT is set (in env or a config you write later)."
   fi
 fi
 

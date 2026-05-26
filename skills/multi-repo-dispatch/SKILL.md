@@ -1,6 +1,6 @@
 ---
 name: multi-repo-dispatch
-description: Use when starting work that spans 2+ repos from a parent dir like ~/projects (no single git repo in cwd), or when picking up an issue that touches multiple repos. Orchestrates parallel subagents in isolated worktrees and lands draft PRs only — never ready-for-review.
+description: Use when starting work that spans 2+ repos from a parent dir containing many cloned repos ($WT_ROOT, no single git repo in cwd), or when picking up an issue that touches multiple repos. Orchestrates parallel subagents in isolated worktrees and lands draft PRs only — never ready-for-review.
 ---
 
 # Multi-Repo Dispatch
@@ -11,7 +11,7 @@ description: Use when starting work that spans 2+ repos from a parent dir like ~
 
 This file ships generic. Three things vary by team and live in your environment, **not in this file**:
 
-1. **Parent dir of repos.** Default is `~/projects`. Override in `~/.config/wt-tools/wt-tools.conf` via `WT_ROOT`.
+1. **Parent dir of repos.** Required — set `WT_ROOT` to the absolute path of the dir containing your cloned repos. Configured in `~/.config/wt-tools/wt-tools.conf` (written by `install.sh` on first run) or via env var. No default.
 2. **Issue tracker integration** (Linear / Jira / GitHub Issues / Asana / Shortcut / …). The skill uses placeholders below — `<tracker-identify-repos>`, `<tracker-comment>`, `<tracker-link-prs>`. Replace those with the names of your own skills that perform those operations, or delete the tracker-input path entirely and use explicit input mode only.
 3. **Default branch name.** This skill says `<default-branch>` in command templates. Substitute with `main`, `master`, `develop`, or whatever your repos use.
 
@@ -27,7 +27,7 @@ You are orchestrating, not implementing. From a parent directory containing many
 
 ## When to Use
 
-- Cwd is a parent dir of repos (e.g. `$WT_ROOT`, default `~/projects`), not a single repo
+- Cwd is `$WT_ROOT` (the parent dir of your cloned repos), not a single repo
 - Tracked issue touches 2+ repos
 - Explicit instruction names 2+ repos to apply a change to
 

@@ -90,7 +90,7 @@ Uninstall: remove the symlinks in `$PREFIX`, restore the `.bak` settings.json fi
 ## Usage
 
 ```bash
-wt-audit                              # table view of all linked worktrees under ~/projects
+wt-audit                              # table view of all linked worktrees under $WT_ROOT
 wt-audit --repo my-repo               # one repo
 wt-audit --json                       # machine-readable
 wt-audit --json --filter removable    # only candidates
@@ -190,7 +190,7 @@ Three layers, in order of precedence (last wins):
 All three are POSIX-shell-sourceable. Common knobs:
 
 ```sh
-WT_ROOT="$HOME/projects"
+WT_ROOT="$HOME/code"          # required; no default — wt-audit/wt-clean refuse to run without it
 WT_WORKTREE_DIR=".worktrees"
 WT_STALE_DAYS_AUDIT=30
 WT_STALE_DAYS_CLEAN=60
@@ -215,8 +215,8 @@ WT_ENFORCE_SCOPE="all"
 
 `wt-tools` assumes:
 
-- One **parent dir** (`$WT_ROOT`, default `~/projects`) containing your cloned repos.
-- Each repo's worktrees live at `<repo>/$WT_WORKTREE_DIR/...` (default `.worktrees/`). Sibling-dir worktrees still show up in the audit but are skipped by default in `wt-clean`.
+- One **parent dir** (`$WT_ROOT` — required, no default; set by `install.sh` on first run or in `~/.config/wt-tools/wt-tools.conf`) containing your cloned repos.
+- Each repo's worktrees live at `<repo>/$WT_WORKTREE_DIR/...` (default `.worktrees/`). Sibling-dir worktrees still show up in the audit but are skipped by default in `wt-clean`. If you find lots of sibling-dir worktrees in your audit, your `WT_WORKTREE_DIR` may not match your team's convention — `tools/doctor.sh` flags this.
 
 There's no support for a global worktree directory (`~/worktrees/...`). If you need that, fork and add it.
 
