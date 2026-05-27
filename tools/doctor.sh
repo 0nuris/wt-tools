@@ -118,7 +118,7 @@ echo "hook:"
 # on round-trip (e.g. when the user toggles a CC setting), so any custom
 # marker we add disappears at the first write. The command path is a known
 # field and survives, and the rule name is the command's last token.
-EXPECTED_RULES="draft-prs no-force-remove no-pr-merge no-pr-ready"
+EXPECTED_RULES="draft-prs inspect-wrapped no-force-remove no-pr-merge no-pr-ready"
 if [[ -f "$CLAUDE_SETTINGS" ]]; then
   check "$CLAUDE_SETTINGS" ok
   if jq -e '.hooks.PreToolUse' "$CLAUDE_SETTINGS" >/dev/null 2>&1; then
@@ -129,7 +129,7 @@ if [[ -f "$CLAUDE_SETTINGS" ]]; then
       | sort | unique | join(" ")
     ' "$CLAUDE_SETTINGS")"
     if [[ "$found_rules" == "$EXPECTED_RULES" ]]; then
-      check "wt-tools hook entries" ok "4 rules wired ($found_rules)"
+      check "wt-tools hook entries" ok "5 rules wired ($found_rules)"
     elif [[ -z "$found_rules" ]]; then
       check "wt-tools hook entries" fail "no wt-validate-bash entries — run install.sh"
     else

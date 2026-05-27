@@ -23,6 +23,16 @@
             "type": "command",
             "if": "Bash(git worktree remove*)",
             "command": "bash \"__WT_TOOLS_HOME__/bin/wt-validate-bash\" no-force-remove"
+          },
+          {
+            "type": "command",
+            "if": "Bash(bash *)",
+            "command": "bash \"__WT_TOOLS_HOME__/bin/wt-validate-bash\" inspect-wrapped"
+          },
+          {
+            "type": "command",
+            "if": "Bash(sh *)",
+            "command": "bash \"__WT_TOOLS_HOME__/bin/wt-validate-bash\" inspect-wrapped"
           }
         ]
       }

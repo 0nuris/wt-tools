@@ -218,14 +218,144 @@ run_validator_cwd() {
     [[ "$output" == *'"deny"'* ]]
 }
 
+# ---- inspect-wrapped rule (catches bash -c / sh -c wrapped commands) ----
+
+@test "inspect-wrapped: blocks bash -c \"gh pr create ...\"" {
+    run_validator inspect-wrapped 'bash -c "gh pr create --title X --body Y"'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"deny"'* ]]
+    [[ "$output" == *"draft"* ]]
+}
+
+@test "inspect-wrapped: blocks sh -c \"gh pr create ...\"" {
+    run_validator inspect-wrapped 'sh -c "gh pr create --title X --body Y"'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"deny"'* ]]
+}
+
+@test "inspect-wrapped: allows bash -c \"gh pr create --draft ...\"" {
+    run_validator inspect-wrapped 'bash -c "gh pr create --draft --title X --body Y"'
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "inspect-wrapped: blocks single-quoted bash -c 'gh pr create ...'" {
+    run_validator inspect-wrapped "bash -c 'gh pr create --title X --body Y'"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"deny"'* ]]
+}
+
+@test "inspect-wrapped: blocks bash -lc \"gh pr create ...\" (flag cluster)" {
+    run_validator inspect-wrapped 'bash -lc "gh pr create --title X --body Y"'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"deny"'* ]]
+}
+
+@test "inspect-wrapped: blocks bash -c \"gh pr ready 1\"" {
+    run_validator inspect-wrapped 'bash -c "gh pr ready 1"'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"deny"'* ]]
+    [[ "$output" == *"gh pr ready"* ]]
+}
+
+@test "inspect-wrapped: blocks bash -c \"gh pr merge 1 --squash\"" {
+    run_validator inspect-wrapped 'bash -c "gh pr merge 1 --squash"'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"deny"'* ]]
+    [[ "$output" == *"gh pr merge"* ]]
+}
+
+@test "inspect-wrapped: blocks bash -c \"git worktree remove --force /tmp/x\"" {
+    run_validator inspect-wrapped 'bash -c "git worktree remove --force /tmp/x"'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"deny"'* ]]
+    [[ "$output" == *"--force"* ]]
+}
+
+@test "inspect-wrapped: allows bash -c \"git worktree remove /tmp/x\" (no --force)" {
+    run_validator inspect-wrapped 'bash -c "git worktree remove /tmp/x"'
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "inspect-wrapped: honors WT_ALLOW_NONDRAFT=1 prefix" {
+    run_validator inspect-wrapped 'WT_ALLOW_NONDRAFT=1 bash -c "gh pr create --title X --body Y"'
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "inspect-wrapped: honors WT_ALLOW_MERGE=1 prefix" {
+    run_validator inspect-wrapped 'WT_ALLOW_MERGE=1 bash -c "gh pr merge 1 --squash"'
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "inspect-wrapped: honors WT_ALLOW_FORCE=1 prefix" {
+    run_validator inspect-wrapped 'WT_ALLOW_FORCE=1 bash -c "git worktree remove --force /tmp/x"'
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "inspect-wrapped: defers when wrapped command has no rule match" {
+    run_validator inspect-wrapped 'bash -c "echo hello world"'
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "inspect-wrapped: defers when bash has no -c flag" {
+    run_validator inspect-wrapped 'bash script.sh'
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "inspect-wrapped: defers when outer command is not bash/sh" {
+    run_validator inspect-wrapped 'python -c "import os; os.system(\"gh pr create\")"'
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "inspect-wrapped: scope check defers in main checkout (default scope)" {
+    unset WT_ENFORCE_SCOPE
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    git -C "$tmpdir" init -q -b main
+    git -C "$tmpdir" commit -q --allow-empty -m init
+    run_validator_cwd inspect-wrapped 'bash -c "gh pr create --title X"' "$tmpdir"
+    rm -rf "$tmpdir"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "inspect-wrapped: scope check enforces inside a linked worktree" {
+    unset WT_ENFORCE_SCOPE
+    local tmpdir wt
+    tmpdir="$(mktemp -d)"
+    git -C "$tmpdir" init -q -b main
+    git -C "$tmpdir" commit -q --allow-empty -m init
+    wt="$tmpdir/.worktrees/foo"
+    git -C "$tmpdir" worktree add -q "$wt" -b foo
+    run_validator_cwd inspect-wrapped 'bash -c "gh pr create --title X"' "$wt"
+    git -C "$tmpdir" worktree remove "$wt" 2>/dev/null || true
+    rm -rf "$tmpdir"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"deny"'* ]]
+}
+
 # ---- threat-model notes (no asserts; documentation of how evasion actually works) ----
 #
-# The validator alone is conservative: when invoked with the draft-prs rule on
-# *any* command lacking a --draft token, it denies. The real evasion path is
-# the hook's `if` filter (in settings.fragment.json), which uses permission-rule
-# syntax like `Bash(gh pr create*)`. Commands wrapped in `bash -c "..."`, fed
-# via heredocs, or built by string concatenation do not match that pattern, so
-# the validator never runs for them.
+# After commit landing the `inspect-wrapped` rule + `Bash(bash *)` / `Bash(sh *)`
+# matchers, the validator catches `bash -c "..."` and `sh -c "..."` wrappers
+# around the four blocked patterns. The `if` filter routes any bash/sh
+# invocation through the inspect-wrapped path; the validator slices past the
+# -c flag, strips outer quote chars from the tokenized args, and re-runs all
+# four rule checks against the wrapped tokens.
+#
+# Still NOT caught (documented limitations):
+#   - Heredocs: `bash <<EOF\ngh pr create\nEOF` — needs heredoc parsing
+#   - String concatenation: `cmd="gh pr"; $cmd create` — requires variable expansion
+#   - Aliases: `alias gpc='gh pr create'; gpc` — shell-runtime resolution
+#   - Indirect script invocation: `./run.sh` calling `gh pr create` — needs file-execution sandbox
+#   - Other interpreters: `python -c "..."`, `node -e "..."` — only bash/sh wrap shell commands
 #
 # That layered design is intentional: the `if` filter handles "is this
 # command in scope?"; the validator handles "given it is in scope, does it

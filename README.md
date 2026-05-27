@@ -159,15 +159,20 @@ The validator parses the prefix from the command string. The bypass shows up ver
 
 ### Threat model — read this before trusting the hook
 
-The validator does **token-level matching after whitespace splitting** of the bash command string. It catches the model's normal invocation patterns. It does NOT catch:
+The validator does **token-level matching after whitespace splitting** of the bash command string. It catches the model's normal invocation patterns plus the most common wrapper:
 
-- Heredoc-fed commands: `bash <<EOF\ngh pr create\nEOF`
-- `bash -c "gh pr create ..."` (the `if` filter doesn't match either)
-- Commands built by string concatenation: `cmd="gh pr"; $cmd create`
-- Aliased commands
+**Caught:**
+- Direct invocations: `gh pr create ...`, `gh pr ready ...`, `gh pr merge ...`, `git worktree remove --force ...`
+- `bash -c "..."` and `sh -c "..."` wrappers around any of the above (including flag clusters like `bash -lc`). The `inspect-wrapped` rule slices past the `-c` flag, strips outer quote chars from the tokenized args, and re-runs all four rule checks against the wrapped tokens. `WT_ALLOW_*` bypass env vars at the outer command's front still work.
+
+**NOT caught (documented limitations):**
+- Heredoc-fed commands: `bash <<EOF\ngh pr create\nEOF` — needs heredoc parsing
+- Commands built by string concatenation: `cmd="gh pr"; $cmd create` — requires variable expansion
+- Aliased commands: `alias gpc='gh pr create'; gpc` — shell-runtime resolution
 - Anything routed through scripts that aren't visible in the literal Bash command string
+- Other interpreters: `python -c "..."`, `node -e "..."` — only bash/sh wrap shell commands directly
 
-These are documented limitations, not bugs. The hook is a **floor** for the common case (the model directly invokes `gh` / `git`), not a sandbox.
+These are documented limitations, not bugs. The hook is a **floor** for the common case + the most accessible wrapper, not a sandbox.
 
 ### Disable temporarily
 

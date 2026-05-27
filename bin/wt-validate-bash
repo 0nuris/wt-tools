@@ -176,32 +176,84 @@ while [[ ${#tokens[@]} -gt 0 ]]; do
   esac
 done
 
+# ---- per-rule check helpers ----------------------------------------------
+# Each helper takes the token list as positional args and either returns 0
+# (no match / bypass / safe) or calls deny() (which exits with the JSON
+# payload). They read the bypass_* variables set during the env-stripping
+# pass above. Sharing these helpers between the direct rules and the
+# inspect-wrapped rule means the rule signatures and deny messages live in
+# one place.
+
+check_draft_prs() {
+  local -a t=("$@")
+  has_token_sequence gh pr create -- "${t[@]:-}" || return 0
+  [[ -n "$bypass_nondraft" ]] && return 0
+  has_token "--draft" "${t[@]:-}" && return 0
+  deny "wt-tools: draft PRs only. Add --draft to the command, or prefix it with WT_ALLOW_NONDRAFT=1 to bypass for this single invocation."
+}
+
+check_no_pr_ready() {
+  local -a t=("$@")
+  has_token_sequence gh pr ready -- "${t[@]:-}" || return 0
+  deny "wt-tools: gh pr ready is blocked. The user marks PRs ready manually — automation does not. No bypass available."
+}
+
+check_no_pr_merge() {
+  local -a t=("$@")
+  has_token_sequence gh pr merge -- "${t[@]:-}" || return 0
+  [[ -n "$bypass_merge" ]] && return 0
+  deny "wt-tools: gh pr merge is blocked from automation. Prefix the command with WT_ALLOW_MERGE=1 to bypass for this single invocation."
+}
+
+check_no_force_remove() {
+  local -a t=("$@")
+  has_token_sequence git worktree remove -- "${t[@]:-}" || return 0
+  [[ -n "$bypass_force" ]] && return 0
+  has_token "--force" "${t[@]:-}" || return 0
+  deny "wt-tools: git worktree remove --force is blocked (would destroy uncommitted work). Prefix the command with WT_ALLOW_FORCE=1 to bypass for this single invocation."
+}
+
+# inspect-wrapped: the outer command is bash/sh, the actual command-of-
+# interest is inside a -c argument. Locate -c (supporting short-flag
+# clusters like -lic), slice the tokens after it, strip outer quote chars
+# left over from whitespace-tokenizing the quoted shell string, and re-run
+# all four rule checks against the cleaned wrapped tokens. The env-var
+# bypass detection happened at the outer command's front, so WT_ALLOW_*
+# vars are honored automatically.
+check_inspect_wrapped() {
+  local -a t=("$@")
+  [[ "${t[0]:-}" == "bash" || "${t[0]:-}" == "sh" ]] || return 0
+
+  local i c_idx=-1
+  for ((i=1; i<${#t[@]}; i++)); do
+    if [[ "${t[i]}" == "-c" ]] || [[ "${t[i]}" =~ ^-[a-zA-Z]*c$ ]]; then
+      c_idx=$i; break
+    fi
+  done
+  (( c_idx == -1 )) && return 0
+
+  local -a wrapped=("${t[@]:c_idx+1}")
+  local -a cleaned=()
+  local tok
+  for tok in "${wrapped[@]:-}"; do
+    tok="${tok#\"}"; tok="${tok#\'}"
+    tok="${tok%\"}"; tok="${tok%\'}"
+    cleaned+=("$tok")
+  done
+
+  check_draft_prs        "${cleaned[@]:-}"
+  check_no_pr_ready      "${cleaned[@]:-}"
+  check_no_pr_merge      "${cleaned[@]:-}"
+  check_no_force_remove  "${cleaned[@]:-}"
+}
+
 # ---- apply rule ----------------------------------------------------------
 case "$rule" in
-  draft-prs)
-    # Sanity: only enforce if `gh pr create` actually appears in the tokens.
-    has_token_sequence gh pr create -- "${tokens[@]:-}" || exit 0
-    [[ -n "$bypass_nondraft" ]] && exit 0
-    if ! has_token "--draft" "${tokens[@]:-}"; then
-      deny "wt-tools: draft PRs only. Add --draft to the command, or prefix it with WT_ALLOW_NONDRAFT=1 to bypass for this single invocation."
-    fi
-    ;;
-  no-pr-ready)
-    has_token_sequence gh pr ready -- "${tokens[@]:-}" || exit 0
-    deny "wt-tools: gh pr ready is blocked. The user marks PRs ready manually — automation does not. No bypass available."
-    ;;
-  no-pr-merge)
-    has_token_sequence gh pr merge -- "${tokens[@]:-}" || exit 0
-    [[ -n "$bypass_merge" ]] && exit 0
-    deny "wt-tools: gh pr merge is blocked from automation. Prefix the command with WT_ALLOW_MERGE=1 to bypass for this single invocation."
-    ;;
-  no-force-remove)
-    has_token_sequence git worktree remove -- "${tokens[@]:-}" || exit 0
-    [[ -n "$bypass_force" ]] && exit 0
-    if has_token "--force" "${tokens[@]:-}"; then
-      deny "wt-tools: git worktree remove --force is blocked (would destroy uncommitted work). Prefix the command with WT_ALLOW_FORCE=1 to bypass for this single invocation."
-    fi
-    ;;
+  draft-prs)        check_draft_prs        "${tokens[@]:-}" ;;
+  no-pr-ready)      check_no_pr_ready      "${tokens[@]:-}" ;;
+  no-pr-merge)      check_no_pr_merge      "${tokens[@]:-}" ;;
+  no-force-remove)  check_no_force_remove  "${tokens[@]:-}" ;;
+  inspect-wrapped)  check_inspect_wrapped  "${tokens[@]:-}" ;;
   *)
     # Unknown rule: defer. install.sh should never wire this, but don't fail closed.
     exit 0
