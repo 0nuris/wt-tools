@@ -114,6 +114,8 @@ idempotent reconciliation covers create, repoint, and dangling-link repair.
      content isn't worktree-unique before removing it.
    - `target` absent → `mkdir -p "$(dirname target)"`; `ln -s "$source" "$target"` →
      **created**.
+   - **After any create or repair, enforce the ignore guarantee** (below) on the new
+     symlink.
 7. For a candidate **absent in main** (`test ! -e source`): record a **human-only**
    item. This arises for (a) the injected `node_modules` guard from step 4, and (b) any
    `WT_LINK_PATHS` entry that names something main doesn't have. For `node_modules`,
@@ -125,6 +127,33 @@ idempotent reconciliation covers create, repoint, and dangling-link repair.
    = already-correct links left untouched, `conflicts` = real entries blocking a link,
    `pending` = absent-in-main human-only installs). Pending-human total = `C + P`;
    exit `1` if `C + P > 0`, else `0`.
+
+## Ignore guarantee (a created symlink must be uncommittable)
+
+**The gotcha (verified):** a `.gitignore` pattern with a trailing slash
+(`node_modules/`, `dist/`) matches *directories only*. Git treats a **symlink** as a
+file, not a directory — so a symlink named `node_modules` is **not** ignored by
+`node_modules/`, shows up as `?? node_modules` in `git status`, and **can be
+committed**. Bare patterns (`node_modules`, `.env`) match the symlink and are safe.
+Since `node_modules` (and other dep dirs) are the prime artifacts and are commonly
+ignored with a trailing slash, the naive symlink is committable by default.
+
+**Enforcement.** After creating or repairing a symlink, `wt-link` guarantees it is
+ignored in the worktree:
+
+1. `git -C <worktree> check-ignore -q "<entry>"` → already ignored? done.
+2. Otherwise append the entry (trailing slash stripped; for a root dir that's the bare
+   name, e.g. `node_modules`) to the worktree's git exclude file
+   `$(git -C <worktree> rev-parse --git-path info/exclude)`. This resolves to the
+   repo's shared, **untracked** `.git/info/exclude` — so the rule itself can never be
+   committed, and it only *adds* an ignore for an artifact that should be ignored
+   anyway. Append idempotently (skip if the line already exists).
+3. Re-check with `check-ignore`. If it's *still* not ignored (e.g. a negated rule), do
+   **not** leave a committable symlink silently: record a problem
+   (`WARNING: <path> is not git-ignored and could be committed`) → counts toward
+   pending-human → exit `1`.
+
+This makes "symlinked items are uncommittable when gitignored" a guarantee, not a hope.
 
 ## Package-manager detection (install hint only)
 
@@ -221,6 +250,9 @@ add a linked worktree; run `wt-link` against it.
 10. Run from the main checkout → exit `2`.
 11. Run outside any git repo → exit `2`.
 12. Path with spaces handled.
+13. **Ignore guarantee:** main `.gitignore` has the dir-only rule `node_modules/`;
+    after `wt-link`, the worktree's `git status --porcelain` does **not** list
+    `node_modules` (the exclude-file remediation made the symlink uncommittable).
 
 ## Docs
 
