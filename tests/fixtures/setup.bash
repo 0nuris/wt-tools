@@ -10,7 +10,7 @@
 
 # Initialize a fresh, isolated WT_ROOT for the current test.
 wt_setup_fixture() {
-  export WT_ROOT="$BATS_TEST_TMPDIR/projects"
+  export WT_ROOT="$(cd "$BATS_TEST_TMPDIR" && pwd -P)/projects"
   mkdir -p "$WT_ROOT"
   # Empty config — tests provide their own env overrides.
   export WT_TOOLS_CONFIG="$BATS_TEST_TMPDIR/empty.conf"

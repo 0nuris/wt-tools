@@ -51,4 +51,120 @@ if [[ "$WT_DIR" == "$MAIN_DIR" ]]; then
   exit 2
 fi
 
-echo "wt-link: worktree=$WT_DIR main=$MAIN_DIR"
+# ---- per-repo config + knob defaults -------------------------------------
+# shellcheck source=/dev/null
+[[ -f "$MAIN_DIR/.wt-tools.conf" ]] && . "$MAIN_DIR/.wt-tools.conf"
+# shellcheck source=/dev/null
+[[ -f "$MAIN_DIR/.wt-tools.local.conf" ]] && . "$MAIN_DIR/.wt-tools.local.conf"
+: "${WT_LINK_AUTO:=true}"
+: "${WT_LINK_PATHS:=}"
+: "${WT_LINK_EXCLUDE:=}"
+
+# ---- denylist ------------------------------------------------------------
+BUILTIN_DENY=(.next .nuxt .svelte-kit dist build out .output coverage .turbo \
+              .cache .parcel-cache .vite .pytest_cache __pycache__ '*.log' \
+              .DS_Store Thumbs.db)
+USER_DENY=()
+# shellcheck disable=SC2206
+[[ -n "$WT_LINK_EXCLUDE" ]] && USER_DENY=( $WT_LINK_EXCLUDE )
+DENY=( "${BUILTIN_DENY[@]}" "${USER_DENY[@]+"${USER_DENY[@]}"}" )
+
+is_denied() {
+  local name="$1" pat
+  for pat in "${DENY[@]}"; do
+    # shellcheck disable=SC2053
+    [[ "$name" == $pat ]] && return 0
+  done
+  return 1
+}
+
+# ---- build candidate set -------------------------------------------------
+CANDIDATES=()
+add_candidate() {
+  local c="$1" e
+  if (( ${#CANDIDATES[@]} )); then
+    for e in "${CANDIDATES[@]}"; do [[ "$e" == "$c" ]] && return 0; done
+  fi
+  CANDIDATES+=("$c")
+}
+
+if [[ "$WT_LINK_AUTO" == "true" ]]; then
+  while IFS= read -r entry; do
+    [[ -z "$entry" ]] && continue
+    entry="${entry%/}"
+    [[ "$entry" == */* ]] && continue        # root-level only
+    is_denied "$entry" && continue
+    add_candidate "$entry"
+  done < <(git -C "$MAIN_DIR" ls-files --others --ignored --exclude-standard --directory)
+fi
+
+# shellcheck disable=SC2206
+[[ -n "$WT_LINK_PATHS" ]] && for entry in $WT_LINK_PATHS; do add_candidate "$entry"; done
+
+# ---- reconcile -----------------------------------------------------------
+created=0; repaired=0; ok=0; conflicts=0; pending=0
+INFO=(); PROBLEM=()
+note_info()    { INFO+=("$1"); }
+note_problem() { PROBLEM+=("$1"); }
+
+# Guarantee a just-created symlink is git-ignored in the worktree. A dir-only
+# .gitignore rule (node_modules/) does NOT ignore a symlink, so we add a bare
+# pattern to the repo's untracked exclude file and re-verify.
+ensure_ignored() {
+  local entry="${1%/}" base excl
+  git -C "$WT_DIR" check-ignore -q "$entry" 2>/dev/null && return 0
+  excl="$(git -C "$WT_DIR" rev-parse --git-path info/exclude)"
+  mkdir -p "$(dirname "$excl")"
+  grep -qxF "$entry" "$excl" 2>/dev/null || printf '%s\n' "$entry" >> "$excl"
+  if git -C "$WT_DIR" check-ignore -q "$entry" 2>/dev/null; then
+    note_info "ignore-guard: added '$entry' to $excl (was committable under a dir-only rule)"
+    return 0
+  fi
+  note_problem "WARNING: $WT_DIR/$entry is NOT git-ignored and could be committed —"
+  note_problem "  add an ignore rule for '$entry' with no trailing slash."
+  pending=$((pending+1))
+  return 1
+}
+
+link_one() {
+  local entry="$1" src="$MAIN_DIR/$1" dst="$WT_DIR/$1"
+
+  if [[ -L "$dst" ]]; then
+    local cur; cur="$(readlink "$dst")"
+    if [[ "$cur" == "$src" ]]; then ok=$((ok+1)); return; fi
+    if (( DRY_RUN )); then note_info "would repair: $dst -> $src (was $cur)"
+    else rm "$dst"; mkdir -p "$(dirname "$dst")"; ln -s "$src" "$dst"
+         note_info "repaired: $dst -> $src"; ensure_ignored "$entry"; fi
+    repaired=$((repaired+1)); return
+  fi
+
+  if [[ -e "$dst" ]]; then
+    conflicts=$((conflicts+1))
+    if [[ -d "$dst" ]]; then
+      note_problem "conflict: $dst is a real dir, not a link to main — left as-is."
+      note_problem "  replace it with the shared copy from main:"
+      note_problem "    ! rm -rf \"$dst\" && wt-link \"$WT_DIR\""
+    else
+      note_problem "conflict: $dst is a real file, not a link to main — left as-is."
+      note_problem "  replace it with the shared copy from main:"
+      note_problem "    ! rm -f \"$dst\" && wt-link \"$WT_DIR\""
+    fi
+    return
+  fi
+
+  if (( DRY_RUN )); then note_info "would link: $dst -> $src"
+  else mkdir -p "$(dirname "$dst")"; ln -s "$src" "$dst"
+       note_info "linked: $dst -> $src"; ensure_ignored "$entry"; fi
+  created=$((created+1))
+}
+
+if (( ${#CANDIDATES[@]} )); then
+  for entry in "${CANDIDATES[@]}"; do link_one "$entry"; done
+fi
+
+# ---- output --------------------------------------------------------------
+if (( ${#PROBLEM[@]} )); then printf '%s\n' "${PROBLEM[@]}" >&2; fi
+if (( ! QUIET )) && (( ${#INFO[@]} )); then printf '%s\n' "${INFO[@]}"; fi
+(( QUIET )) || echo "wt-link: created $created, repaired $repaired, ok $ok, conflicts $conflicts, pending $pending"
+
+(( conflicts + pending > 0 )) && exit 1 || exit 0
