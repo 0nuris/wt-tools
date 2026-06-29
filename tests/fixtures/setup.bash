@@ -53,3 +53,32 @@ wt_clean_run() {
   WT_ROOT="$WT_ROOT" WT_TOOLS_CONFIG="$WT_TOOLS_CONFIG" \
     bash "$BATS_TEST_DIRNAME/../bin/wt-clean" "$@"
 }
+
+# Run wt-link with the fixture's env. Args forwarded.
+wt_link_run() {
+  WT_TOOLS_CONFIG="$WT_TOOLS_CONFIG" \
+    bash "$BATS_TEST_DIRNAME/../bin/wt-link" "$@"
+}
+
+# Add gitignore patterns to a repo's main checkout (uncommitted is fine —
+# git honors the working-tree .gitignore).
+#   wt_ignore REPO PATTERN...
+wt_ignore() {
+  local repo="$1"; shift
+  printf '%s\n' "$@" >> "$WT_ROOT/$repo/.gitignore"
+}
+
+# Create a gitignored artifact in a repo's main checkout.
+#   wt_make_artifact REPO REL [CONTENT]
+# Trailing slash on REL => a directory containing a `marker` file.
+wt_make_artifact() {
+  local repo="$1" rel="$2" content="${3:-x}" base
+  base="$WT_ROOT/$repo"
+  if [[ "$rel" == */ ]]; then
+    mkdir -p "$base/${rel%/}"
+    printf '%s\n' "$content" > "$base/${rel%/}/marker"
+  else
+    mkdir -p "$(dirname "$base/$rel")"
+    printf '%s\n' "$content" > "$base/$rel"
+  fi
+}

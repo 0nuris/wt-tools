@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# wt-link — symlink shareable gitignored artifacts from a repo's main checkout
+#           into a linked worktree (node_modules, .env, config, ...).
+#
+# Idempotent: re-running reconciles and repairs. Never clobbers real files;
+# emits human-run commands for blocked ops (install, rm -rf of a real dir).
+#
+# Usage:
+#   wt-link [WORKTREE_PATH] [--dry-run] [--quiet] [-h|--help]
+#
+# Exit: 0 reconciled; 1 human action pending; 2 usage / not a worktree.
+
+set -euo pipefail
+
+WT_TOOLS_CONFIG="${WT_TOOLS_CONFIG:-$HOME/.config/wt-tools/wt-tools.conf}"
+# shellcheck source=/dev/null
+[[ -f "$WT_TOOLS_CONFIG" ]] && . "$WT_TOOLS_CONFIG"
+
+# ---- flag parsing --------------------------------------------------------
+DRY_RUN=0
+QUIET=0
+TARGET=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run) DRY_RUN=1; shift ;;
+    --quiet)   QUIET=1; shift ;;
+    --help|-h) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*) echo "wt-link: unknown flag: $1" >&2; exit 2 ;;
+    *)
+      if [[ -z "$TARGET" ]]; then TARGET="$1"; shift
+      else echo "wt-link: unexpected argument: $1" >&2; exit 2; fi ;;
+  esac
+done
+TARGET="${TARGET:-$PWD}"
+
+# ---- resolve worktree + main checkout ------------------------------------
+if ! git -C "$TARGET" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "wt-link: $TARGET is not inside a git repository." >&2
+  exit 2
+fi
+WT_DIR="$(git -C "$TARGET" rev-parse --show-toplevel)"
+MAIN_DIR="$(git -C "$TARGET" worktree list --porcelain \
+            | awk '/^worktree /{print substr($0,10); exit}')"
+if [[ -z "$MAIN_DIR" || ! -d "$MAIN_DIR" ]]; then
+  echo "wt-link: could not locate the main checkout for $WT_DIR." >&2
+  exit 2
+fi
+if [[ "$WT_DIR" == "$MAIN_DIR" ]]; then
+  echo "wt-link: $WT_DIR is the main checkout — it's the source, nothing to link." >&2
+  echo "         Run wt-link from inside a linked worktree." >&2
+  exit 2
+fi
+
+echo "wt-link: worktree=$WT_DIR main=$MAIN_DIR"
