@@ -215,3 +215,35 @@ setup() {
     [ "$status" -eq 0 ]
     [ -L "$WT_LAST_WT_PATH/my secrets" ]
 }
+
+# ---- C1 regression: nested WT_LINK_PATHS under auto-linked dir-only parent --
+
+@test "link: C1 regression — nested WT_LINK_PATHS under gitignored dir does not false-conflict or rm main source" {
+    # Reproduces C1 data-loss bug: WT_LINK_AUTO=true auto-links config/ (dir-only
+    # gitignore rule), then WT_LINK_PATHS="config/local.json" tries to link the
+    # same path, which now resolves THROUGH the parent symlink into MAIN_DIR —
+    # causing a false "real file conflict" and an emitted rm that deletes the source.
+    wt_make_repo alpha
+
+    # dir-only rule in .gitignore (does NOT ignore a bare symlink)
+    printf 'config/\n' > "$WT_ROOT/alpha/.gitignore"
+    git -C "$WT_ROOT/alpha" -c user.email=t@t -c user.name=t add .gitignore
+    git -C "$WT_ROOT/alpha" -c user.email=t@t -c user.name=t commit -q -m gitignore
+
+    # real source file in main
+    mkdir -p "$WT_ROOT/alpha/config"
+    printf '{"env":"production"}\n' > "$WT_ROOT/alpha/config/local.json"
+
+    wt_make_worktree alpha feature
+
+    # WT_LINK_AUTO defaults to true; WT_LINK_PATHS adds the nested file.
+    WT_LINK_PATHS="config/local.json" run wt_link_run "$WT_LAST_WT_PATH"
+
+    # Must exit 0 — not a conflict
+    [ "$status" -eq 0 ]
+    # Output must not mention conflict
+    [[ "$output" != *"conflict"* ]]
+    # Source file in main must still exist with original content
+    [ -f "$WT_ROOT/alpha/config/local.json" ]
+    [ "$(cat "$WT_ROOT/alpha/config/local.json")" = '{"env":"production"}' ]
+}

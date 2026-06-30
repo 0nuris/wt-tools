@@ -107,6 +107,12 @@ if [[ -f "$MAIN_DIR/package.json" && ! -e "$MAIN_DIR/node_modules" ]]; then
 fi
 
 # ---- reconcile -----------------------------------------------------------
+# Physical (symlink-resolved) paths; used in the ancestor guard.
+# MAIN_DIR from git may not be symlink-resolved on macOS (e.g. /tmp vs /private/tmp),
+# so normalise both to avoid string-mismatch false conflicts.
+MAIN_REAL="$(cd "$MAIN_DIR" && pwd -P)"
+WT_REAL="$(cd "$WT_DIR" && pwd -P)"
+
 created=0; repaired=0; ok=0; conflicts=0; pending=0
 INFO=(); PROBLEM=()
 note_info()    { INFO+=("$1"); }
@@ -163,16 +169,51 @@ link_one() {
     repaired=$((repaired+1)); return
   fi
 
+  # Ancestor-link guard: if dst's parent already resolves into MAIN_REAL (via a
+  # symlinked ancestor), the target is already shared — not a conflict.
+  # Exclude the worktree's own directory subtree (WT_REAL), which is physically
+  # under MAIN_REAL when worktrees are nested inside the main checkout.
+  local parent_real=""
+  local parent; parent="$(dirname "$dst")"
+  if [[ -d "$parent" ]]; then
+    parent_real="$(cd "$parent" && pwd -P)" || parent_real=""
+  fi
+  if [[ -n "$parent_real" \
+        && ( "$parent_real" == "$MAIN_REAL" || "$parent_real" == "$MAIN_REAL"/* ) \
+        && "$parent_real" != "$WT_REAL" && "$parent_real" != "$WT_REAL"/* ]]; then
+    ok=$((ok+1))
+    note_info "ok (shared via linked parent): $entry"
+    return
+  fi
+
   if [[ -e "$dst" ]]; then
     conflicts=$((conflicts+1))
     if [[ -d "$dst" ]]; then
       note_problem "conflict: $dst is a real dir, not a link to main — left as-is."
       note_problem "  replace it with the shared copy from main:"
-      note_problem "    ! rm -rf \"$dst\" && wt-link \"$WT_DIR\""
+      # Belt-and-suspenders: never emit rm when dst resolves into MAIN_REAL
+      # but outside the worktree's own subtree (WT_REAL is physically under MAIN_REAL
+      # when worktrees are nested).
+      local dst_real; dst_real="$(cd "$dst" && pwd -P 2>/dev/null)" || dst_real=""
+      if [[ -n "$dst_real" \
+            && ( "$dst_real" == "$MAIN_REAL" || "$dst_real" == "$MAIN_REAL"/* ) \
+            && "$dst_real" != "$WT_REAL" && "$dst_real" != "$WT_REAL"/* ]]; then
+        note_problem "  (rm skipped — path resolves into the main checkout)"
+      else
+        note_problem "    ! rm -rf \"$dst\" && wt-link \"$WT_DIR\""
+      fi
     else
       note_problem "conflict: $dst is a real file, not a link to main — left as-is."
       note_problem "  replace it with the shared copy from main:"
-      note_problem "    ! rm -f \"$dst\" && wt-link \"$WT_DIR\""
+      # Belt-and-suspenders: never emit rm when dst resolves into MAIN_REAL.
+      local dst_dir_real; dst_dir_real="$(cd "$(dirname "$dst")" && pwd -P 2>/dev/null)" || dst_dir_real=""
+      if [[ -n "$dst_dir_real" \
+            && ( "$dst_dir_real" == "$MAIN_REAL" || "$dst_dir_real" == "$MAIN_REAL"/* ) \
+            && "$dst_dir_real" != "$WT_REAL" && "$dst_dir_real" != "$WT_REAL"/* ]]; then
+        note_problem "  (rm skipped — path resolves into the main checkout)"
+      else
+        note_problem "    ! rm -f \"$dst\" && wt-link \"$WT_DIR\""
+      fi
     fi
     return
   fi
