@@ -66,3 +66,45 @@ setup() {
     run git -C "$WT_LAST_WT_PATH" status --porcelain
     [[ "$output" != *"node_modules"* ]]
 }
+
+# ---- idempotency + repair -----------------------------------------------
+
+@test "link: second run is an idempotent no-op (0 created, exit 0)" {
+    wt_make_repo alpha
+    wt_ignore alpha node_modules
+    wt_make_artifact alpha node_modules/
+    wt_make_worktree alpha feature
+    wt_link_run "$WT_LAST_WT_PATH"
+
+    run wt_link_run "$WT_LAST_WT_PATH"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"created 0"* ]]
+    [[ "$output" == *"ok 1"* ]]
+}
+
+@test "link: repairs a dangling symlink" {
+    wt_make_repo alpha
+    wt_ignore alpha node_modules
+    wt_make_artifact alpha node_modules/
+    wt_make_worktree alpha feature
+    ln -s /nonexistent/path "$WT_LAST_WT_PATH/node_modules"
+
+    run wt_link_run "$WT_LAST_WT_PATH"
+    [ "$status" -eq 0 ]
+    [ "$(readlink "$WT_LAST_WT_PATH/node_modules")" = "$WT_ROOT/alpha/node_modules" ]
+    [[ "$output" == *"repaired 1"* ]]
+}
+
+@test "link: repoints a symlink aimed at the wrong target" {
+    wt_make_repo alpha
+    wt_ignore alpha node_modules
+    wt_make_artifact alpha node_modules/
+    wt_make_worktree alpha feature
+    mkdir -p "$BATS_TEST_TMPDIR/elsewhere"
+    ln -s "$BATS_TEST_TMPDIR/elsewhere" "$WT_LAST_WT_PATH/node_modules"
+
+    run wt_link_run "$WT_LAST_WT_PATH"
+    [ "$status" -eq 0 ]
+    [ "$(readlink "$WT_LAST_WT_PATH/node_modules")" = "$WT_ROOT/alpha/node_modules" ]
+    [[ "$output" == *"repaired 1"* ]]
+}
