@@ -108,3 +108,33 @@ setup() {
     [ "$(readlink "$WT_LAST_WT_PATH/node_modules")" = "$WT_ROOT/alpha/node_modules" ]
     [[ "$output" == *"repaired 1"* ]]
 }
+
+# ---- conflicts ----------------------------------------------------------
+
+@test "link: real .env file in worktree is a conflict; emits rm -f one-liner; exit 1" {
+    wt_make_repo alpha
+    wt_ignore alpha node_modules .env
+    wt_make_artifact alpha node_modules/
+    wt_make_artifact alpha .env "MAIN=1"
+    wt_make_worktree alpha feature
+    printf 'LOCAL=1\n' > "$WT_LAST_WT_PATH/.env"   # real file, not a link
+
+    run wt_link_run "$WT_LAST_WT_PATH"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"conflict"* ]]
+    [[ "$output" == *"rm -f \"$WT_LAST_WT_PATH/.env\" && wt-link"* ]]
+    # not clobbered
+    [ "$(cat "$WT_LAST_WT_PATH/.env")" = "LOCAL=1" ]
+}
+
+@test "link: real node_modules dir in worktree is a conflict; emits rm -rf one-liner" {
+    wt_make_repo alpha
+    wt_ignore alpha node_modules
+    wt_make_artifact alpha node_modules/
+    wt_make_worktree alpha feature
+    mkdir -p "$WT_LAST_WT_PATH/node_modules/real"
+
+    run wt_link_run "$WT_LAST_WT_PATH"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"rm -rf \"$WT_LAST_WT_PATH/node_modules\" && wt-link"* ]]
+}
