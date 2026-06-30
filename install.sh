@@ -92,7 +92,7 @@ echo "  PREFIX:        $PREFIX"
 echo
 
 mkdir -p "$PREFIX"
-for script in wt-audit wt-clean; do
+for script in wt-audit wt-clean wt-link; do
   src="$WT_TOOLS_HOME/bin/$script"
   dst="$PREFIX/$script"
   if [[ -L "$dst" ]] && [[ "$(readlink "$dst")" == "$src" ]]; then

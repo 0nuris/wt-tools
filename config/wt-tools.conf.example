@@ -41,3 +41,15 @@ WT_ENFORCE_DRAFT_PRS="${WT_ENFORCE_DRAFT_PRS:-true}"
 WT_ENFORCE_NO_PR_READY="${WT_ENFORCE_NO_PR_READY:-true}"
 WT_ENFORCE_NO_PR_MERGE="${WT_ENFORCE_NO_PR_MERGE:-true}"
 WT_ENFORCE_NO_FORCE_REMOVE="${WT_ENFORCE_NO_FORCE_REMOVE:-true}"
+
+# ---- wt-link (worktree artifact linking) --------------------------------
+# Auto-detect gitignored root entries in the main checkout and symlink them
+# into new worktrees. false = link ONLY what WT_LINK_PATHS names.
+WT_LINK_AUTO="${WT_LINK_AUTO:-true}"
+
+# Force-include extra paths (space-separated; may be nested). Always linked,
+# never subject to the denylist. e.g. "certs/ service-account.json"
+WT_LINK_PATHS="${WT_LINK_PATHS:-}"
+
+# Extend the built-in build/cache/log denylist (space-separated basenames/globs).
+WT_LINK_EXCLUDE="${WT_LINK_EXCLUDE:-}"
