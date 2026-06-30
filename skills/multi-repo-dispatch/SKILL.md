@@ -74,6 +74,11 @@ For each (repo, task) pair:
 1. `cd "$WT_ROOT/<repo>"` (each repo is its own setup; the parent dir is not a git repo).
 2. **REQUIRED:** invoke `using-git-worktrees` to create the isolated workspace.
 3. Branch name: `<tracker-id>-<short-slug>` (tracker input) or `<short-slug>` (explicit input).
+4. After the worktree exists, make shared deps/config available — run `wt-link`
+   inside it (symlinks node_modules, .env, etc. from the main checkout; never
+   runs install). Do NOT `npm install` in the worktree. If `wt-link` exits
+   non-zero, relay its pending/conflict lines to the user — they contain the
+   exact `!`-prefixed command to run.
 
 **Never create branches in the repo's existing checkout.** Parallel agents would collide. Worktree per agent is the only safe arrangement, even if the user "isn't on a branch you'd disturb."
 
@@ -128,6 +133,10 @@ You are working on <repo> in worktree <abs path>, on branch <branch>.
 - You are a single-repo worker. Do NOT invoke `multi-repo-dispatch` — that skill is for the orchestrator, not for you. If you think the task needs multi-repo work, STOP and report back; the orchestrator decides.
 - Follow this repo's existing patterns and run its tests before finishing.
 - If you discover the task is wrong-scoped (e.g. needs a different repo), STOP and report — do not expand scope.
+- Dependencies and config are symlinked from the main checkout, not installed.
+  Do NOT run `npm`/`pnpm`/`yarn` install (blocked). If deps or config are
+  missing or broken, run `wt-link` to reconcile; if it reports a human-only
+  step, STOP and report it — do not work around it.
 
 # Finishing contract
 When your changes are complete and tests pass:
