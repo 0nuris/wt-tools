@@ -11,6 +11,7 @@ The pitch: when you orchestrate work across multiple repos (one agent per repo, 
 | `bin/wt-audit` | Cross-repo read-only worktree inventory | Script |
 | `bin/wt-clean` | Gated destructive cleanup (dry-run by default) | Script |
 | `bin/wt-validate-bash` | The hook validator | Script |
+| `bin/wt-link` | Symlink shared gitignored artifacts into a worktree | Script |
 | `hooks/settings.fragment.json` | PreToolUse rules | Hook config |
 | `config/wt-tools.conf.example` | Sourceable POSIX shell config | Config |
 | `skills/multi-repo-dispatch/SKILL.md` | The orchestration playbook the hook enforces | Claude Code skill |
@@ -111,6 +112,33 @@ Without flags, `wt-clean` skips:
 - worktrees with uncommitted changes (`--force` to include)
 
 A removable worktree must be `merged into default branch`, `upstream-gone`, or `stale` (older than `WT_STALE_DAYS_CLEAN`). The dry-run prints the candidate list with reasons; no surprises.
+
+## Linking shared artifacts into worktrees (`wt-link`)
+
+A new worktree starts without anything gitignored — `node_modules`, `.env`,
+config. `wt-link` symlinks those from the repo's **main checkout** into the
+worktree, so agents don't run `npm install` (which is large, slow, and often
+sandbox-blocked).
+
+```bash
+wt-link                 # reconcile the current worktree (default: cwd)
+wt-link /path/to/wt     # a specific worktree
+wt-link --dry-run       # report desired-vs-actual, change nothing
+```
+
+- **Auto-detect** links gitignored root entries present in main, minus a
+  build/cache/log denylist (`.next`, `dist`, `coverage`, `*.log`, …). Tune via
+  `WT_LINK_AUTO`, `WT_LINK_PATHS`, `WT_LINK_EXCLUDE` in `wt-tools.conf`.
+- **Idempotent** — re-running is the repair path. It creates missing links,
+  repairs dangling/wrong-target ones, and never clobbers a real file you put
+  there (it reports the conflict and prints `! rm … && wt-link` so you decide).
+- **Never installs or chmods.** If main has no `node_modules`, it prints the
+  exact `! (cd <main> && npm install)` for you to run once; every later
+  worktree then benefits. Exit code is `1` while any human step is pending.
+- **Uncommittable by guarantee.** A dir-only ignore rule (`node_modules/`) does
+  not ignore a *symlink*, so `wt-link` adds a bare pattern to the worktree's
+  untracked `.git/info/exclude` and verifies `git check-ignore` — the linked
+  artifacts can't be staged or committed.
 
 ## The PreToolUse hook (deterministic enforcement)
 
@@ -237,7 +265,9 @@ bats install on macOS: `brew install bats-core`.
 
 ## Not in scope (yet)
 
-- A `wt-create` wrapper. Use `git worktree add` directly or the `using-git-worktrees` superpowers skill.
+- A `wt-create` wrapper. Worktree *creation* is still delegated to `git worktree
+  add` / the `using-git-worktrees` skill. (`wt-link` is a *post-create* setup
+  helper, not a creation wrapper.)
 - A `wt-dispatch` script for multi-repo parallel orchestration. That responsibility belongs in a Claude Code skill (`multi-repo-dispatch` or similar). `wt-tools` enforces the rules; the skill provides the playbook.
 - Linear / Jira / Asana integration.
 - Branch-naming conventions.

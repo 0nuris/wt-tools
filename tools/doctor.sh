@@ -202,6 +202,9 @@ fi
 
 # ---- summary ------------------------------------------------------------
 echo
+echo "next steps:"
+echo "  tip: run 'wt-link --dry-run' inside a worktree to check its shared-artifact links."
+echo
 if (( fail > 0 )); then
   red "Summary: $fail check(s) failed, $warn warning(s). See above."
   exit 1
