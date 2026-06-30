@@ -138,3 +138,30 @@ setup() {
     [ "$status" -eq 1 ]
     [[ "$output" == *"rm -rf \"$WT_LAST_WT_PATH/node_modules\" && wt-link"* ]]
 }
+
+# ---- expected-but-absent node_modules -----------------------------------
+
+@test "link: package.json but no node_modules in main → exit 1 + npm hint" {
+    wt_make_repo alpha
+    wt_ignore alpha node_modules
+    wt_make_artifact alpha package.json '{}'
+    wt_make_worktree alpha feature
+
+    run wt_link_run "$WT_LAST_WT_PATH"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"main has no node_modules"* ]]
+    [[ "$output" == *"npm install"* ]]
+    [[ "$output" == *"$WT_ROOT/alpha"* ]]
+}
+
+@test "link: pnpm-lock.yaml yields a pnpm install hint" {
+    wt_make_repo alpha
+    wt_ignore alpha node_modules
+    wt_make_artifact alpha package.json '{}'
+    wt_make_artifact alpha pnpm-lock.yaml ''
+    wt_make_worktree alpha feature
+
+    run wt_link_run "$WT_LAST_WT_PATH"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"pnpm install"* ]]
+}

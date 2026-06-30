@@ -101,6 +101,11 @@ fi
 # shellcheck disable=SC2206
 [[ -n "$WT_LINK_PATHS" ]] && for entry in $WT_LINK_PATHS; do add_candidate "$entry"; done
 
+# Expected-but-absent guard: a Node repo with no installed deps in main.
+if [[ -f "$MAIN_DIR/package.json" && ! -e "$MAIN_DIR/node_modules" ]]; then
+  add_candidate "node_modules"
+fi
+
 # ---- reconcile -----------------------------------------------------------
 created=0; repaired=0; ok=0; conflicts=0; pending=0
 INFO=(); PROBLEM=()
@@ -126,8 +131,28 @@ ensure_ignored() {
   return 1
 }
 
+detect_pm() {
+  if   [[ -f "$MAIN_DIR/pnpm-lock.yaml" ]]; then echo pnpm
+  elif [[ -f "$MAIN_DIR/yarn.lock" ]];      then echo yarn
+  elif [[ -f "$MAIN_DIR/bun.lockb" ]];      then echo bun
+  else echo npm; fi
+}
+
 link_one() {
   local entry="$1" src="$MAIN_DIR/$1" dst="$WT_DIR/$1"
+
+  if [[ ! -e "$src" && ! -L "$src" ]]; then
+    if [[ "$entry" == "node_modules" ]]; then
+      local pm; pm="$(detect_pm)"
+      note_problem "pending: main has no node_modules — wt-link can't install it (blocked)."
+      note_problem "  run once, then re-run wt-link:"
+      note_problem "    ! (cd \"$MAIN_DIR\" && $pm install)"
+    else
+      note_problem "pending: \"$entry\" not found in main ($MAIN_DIR) — cannot link."
+    fi
+    pending=$((pending+1))
+    return
+  fi
 
   if [[ -L "$dst" ]]; then
     local cur; cur="$(readlink "$dst")"
