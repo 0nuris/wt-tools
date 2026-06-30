@@ -193,11 +193,13 @@ link_one() {
       note_problem "  replace it with the shared copy from main:"
       # Belt-and-suspenders: never emit rm when dst resolves into MAIN_REAL
       # but outside the worktree's own subtree (WT_REAL is physically under MAIN_REAL
-      # when worktrees are nested).
+      # when worktrees are nested). Fail closed: if the path can't be resolved,
+      # suppress the rm rather than risk deleting the main source of truth.
       local dst_real; dst_real="$(cd "$dst" && pwd -P 2>/dev/null)" || dst_real=""
-      if [[ -n "$dst_real" \
-            && ( "$dst_real" == "$MAIN_REAL" || "$dst_real" == "$MAIN_REAL"/* ) \
-            && "$dst_real" != "$WT_REAL" && "$dst_real" != "$WT_REAL"/* ]]; then
+      if [[ -z "$dst_real" ]]; then
+        note_problem "  (rm skipped — could not resolve \"$dst\" to confirm it's outside main)"
+      elif [[ ( "$dst_real" == "$MAIN_REAL" || "$dst_real" == "$MAIN_REAL"/* ) \
+              && "$dst_real" != "$WT_REAL" && "$dst_real" != "$WT_REAL"/* ]]; then
         note_problem "  (rm skipped — path resolves into the main checkout)"
       else
         note_problem "    ! rm -rf \"$dst\" && wt-link \"$WT_DIR\""
@@ -206,10 +208,12 @@ link_one() {
       note_problem "conflict: $dst is a real file, not a link to main — left as-is."
       note_problem "  replace it with the shared copy from main:"
       # Belt-and-suspenders: never emit rm when dst resolves into MAIN_REAL.
+      # Fail closed: if the path can't be resolved, suppress the rm.
       local dst_dir_real; dst_dir_real="$(cd "$(dirname "$dst")" && pwd -P 2>/dev/null)" || dst_dir_real=""
-      if [[ -n "$dst_dir_real" \
-            && ( "$dst_dir_real" == "$MAIN_REAL" || "$dst_dir_real" == "$MAIN_REAL"/* ) \
-            && "$dst_dir_real" != "$WT_REAL" && "$dst_dir_real" != "$WT_REAL"/* ]]; then
+      if [[ -z "$dst_dir_real" ]]; then
+        note_problem "  (rm skipped — could not resolve \"$dst\" to confirm it's outside main)"
+      elif [[ ( "$dst_dir_real" == "$MAIN_REAL" || "$dst_dir_real" == "$MAIN_REAL"/* ) \
+              && "$dst_dir_real" != "$WT_REAL" && "$dst_dir_real" != "$WT_REAL"/* ]]; then
         note_problem "  (rm skipped — path resolves into the main checkout)"
       else
         note_problem "    ! rm -f \"$dst\" && wt-link \"$WT_DIR\""

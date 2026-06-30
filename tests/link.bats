@@ -246,4 +246,10 @@ setup() {
     # Source file in main must still exist with original content
     [ -f "$WT_ROOT/alpha/config/local.json" ]
     [ "$(cat "$WT_ROOT/alpha/config/local.json")" = '{"env":"production"}' ]
+    # Positive signal: auto-detect linked the parent dir, and the nested file is
+    # reachable through it and reported ok via the ancestor guard (not just "no harm").
+    [ -L "$WT_LAST_WT_PATH/config" ]
+    [ -f "$WT_LAST_WT_PATH/config/local.json" ]
+    [ "$(cat "$WT_LAST_WT_PATH/config/local.json")" = '{"env":"production"}' ]
+    [[ "$output" == *"shared via linked parent"* ]]
 }
