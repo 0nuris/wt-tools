@@ -165,3 +165,53 @@ setup() {
     [ "$status" -eq 1 ]
     [[ "$output" == *"pnpm install"* ]]
 }
+
+# ---- config knobs -------------------------------------------------------
+
+@test "link: WT_LINK_PATHS adds a nested file (mkdir -p parent)" {
+    wt_make_repo alpha
+    wt_ignore alpha config
+    wt_make_artifact alpha config/local.json '{"k":1}'
+    wt_make_worktree alpha feature
+
+    WT_LINK_AUTO=false WT_LINK_PATHS="config/local.json" run wt_link_run "$WT_LAST_WT_PATH"
+    [ "$status" -eq 0 ]
+    [ -L "$WT_LAST_WT_PATH/config/local.json" ]
+}
+
+@test "link: WT_LINK_EXCLUDE drops an otherwise-linked entry" {
+    wt_make_repo alpha
+    wt_ignore alpha node_modules .env
+    wt_make_artifact alpha node_modules/
+    wt_make_artifact alpha .env "x"
+    wt_make_worktree alpha feature
+
+    WT_LINK_EXCLUDE=".env" run wt_link_run "$WT_LAST_WT_PATH"
+    [ "$status" -eq 0 ]
+    [ -L "$WT_LAST_WT_PATH/node_modules" ]
+    [ ! -e "$WT_LAST_WT_PATH/.env" ]
+}
+
+@test "link: WT_LINK_AUTO=false links only WT_LINK_PATHS" {
+    wt_make_repo alpha
+    wt_ignore alpha node_modules .env
+    wt_make_artifact alpha node_modules/
+    wt_make_artifact alpha .env "x"
+    wt_make_worktree alpha feature
+
+    WT_LINK_AUTO=false WT_LINK_PATHS=".env" run wt_link_run "$WT_LAST_WT_PATH"
+    [ "$status" -eq 0 ]
+    [ ! -e "$WT_LAST_WT_PATH/node_modules" ]
+    [ -L "$WT_LAST_WT_PATH/.env" ]
+}
+
+@test "link: handles a path with spaces" {
+    wt_make_repo alpha
+    wt_ignore alpha "my secrets"
+    wt_make_artifact alpha "my secrets/"
+    wt_make_worktree alpha feature
+
+    run wt_link_run "$WT_LAST_WT_PATH"
+    [ "$status" -eq 0 ]
+    [ -L "$WT_LAST_WT_PATH/my secrets" ]
+}

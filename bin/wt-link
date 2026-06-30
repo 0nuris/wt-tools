@@ -116,7 +116,7 @@ note_problem() { PROBLEM+=("$1"); }
 # .gitignore rule (node_modules/) does NOT ignore a symlink, so we add a bare
 # pattern to the repo's untracked exclude file and re-verify.
 ensure_ignored() {
-  local entry="${1%/}" base excl
+  local entry="${1%/}" excl
   git -C "$WT_DIR" check-ignore -q "$entry" 2>/dev/null && return 0
   excl="$(git -C "$WT_DIR" rev-parse --git-path info/exclude)"
   mkdir -p "$(dirname "$excl")"
